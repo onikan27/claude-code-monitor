@@ -32,7 +32,7 @@ echo '{"session_id":"test-123","cwd":"/tmp"}' | npx tsx src/bin/ccm.tsx hook Pre
 
 ## Architecture
 
-Claude Codeの複数セッションをリアルタイム監視するmacOS専用CLIツール。Ink（React for CLI）を使用したTUIとファイルベースの状態管理で動作する。
+Claude Codeの複数セッションをリアルタイム監視するmacOS/Linux対応CLIツール。Ink（React for CLI）を使用したTUIとファイルベースの状態管理で動作する。
 
 ### 重要なファイルパス
 
@@ -69,7 +69,7 @@ Claude Codeの複数セッションをリアルタイム監視するmacOS専用C
 - **ファイル監視**: chokidar
 - **WebSocket**: ws
 - **QRコード生成**: qrcode-terminal
-- **ターミナル制御**: AppleScript（iTerm2, Terminal.app, Ghostty対応）
+- **ターミナル制御**: AppleScript（macOS: iTerm2, Terminal.app, Ghostty対応）、xdotool（Linux）
 - **テスト**: Vitest
 - **リント/フォーマット**: Biome
 

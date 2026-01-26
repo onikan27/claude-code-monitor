@@ -70,39 +70,48 @@ describe('send-text', () => {
       });
     });
 
-    it('should return error for non-macOS platform', () => {
+    it('should return error for unsupported platform', () => {
       Object.defineProperty(process, 'platform', {
-        value: 'linux',
+        value: 'win32',
       });
       const result = sendTextToTerminal('/dev/pts/0', 'test');
       expect(result.success).toBe(false);
-      expect(result.error).toBe('This feature is only available on macOS');
+      expect(result.error).toBe('This feature is only available on macOS and Linux');
+    });
+
+    it('should return error when xdotool is not available on Linux', () => {
+      // This test simulates Linux behavior where xdotool may not be installed
+      // When running on actual Linux without xdotool, it will return an error
+      if (process.platform === 'linux') {
+        const result = sendTextToTerminal('/dev/pts/0', 'test');
+        expect(result.success).toBe(false);
+        // Either xdotool is not installed or focus failed
+        expect(result.error).toBeDefined();
+      }
     });
 
     it('should return error for invalid tty path', () => {
-      // Only test on macOS where this check is reached
-      if (process.platform === 'darwin') {
-        const result = sendTextToTerminal('/invalid/path', 'test');
-        expect(result.success).toBe(false);
-        expect(result.error).toBe('Invalid TTY path');
-      }
+      // This validation now happens on both macOS and Linux
+      const result = sendTextToTerminal('/invalid/path', 'test');
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Invalid TTY path');
     });
 
     it('should return error for empty text', () => {
-      if (process.platform === 'darwin') {
-        const result = sendTextToTerminal('/dev/ttys001', '');
-        expect(result.success).toBe(false);
-        expect(result.error).toBe('Text cannot be empty');
-      }
+      // Text validation happens before platform-specific code
+      const ttyPath = process.platform === 'darwin' ? '/dev/ttys001' : '/dev/pts/0';
+      const result = sendTextToTerminal(ttyPath, '');
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Text cannot be empty');
     });
 
     it('should return error for text exceeding max length', () => {
-      if (process.platform === 'darwin') {
-        const longText = 'a'.repeat(10001);
-        const result = sendTextToTerminal('/dev/ttys001', longText);
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('exceeds maximum length');
-      }
+      // Text validation happens before platform-specific code
+      const ttyPath = process.platform === 'darwin' ? '/dev/ttys001' : '/dev/pts/0';
+      const longText = 'a'.repeat(10001);
+      const result = sendTextToTerminal(ttyPath, longText);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('exceeds maximum length');
     });
   });
 });

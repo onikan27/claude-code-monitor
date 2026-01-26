@@ -146,14 +146,26 @@ describe('focus', () => {
     it('should return array of supported terminal names', () => {
       const terminals = getSupportedTerminals();
       expect(Array.isArray(terminals)).toBe(true);
-      expect(terminals).toContain('iTerm2');
-      expect(terminals).toContain('Terminal.app');
-      expect(terminals).toContain('Ghostty');
+      // On macOS, should return specific terminal names
+      if (process.platform === 'darwin') {
+        expect(terminals).toContain('iTerm2');
+        expect(terminals).toContain('Terminal.app');
+        expect(terminals).toContain('Ghostty');
+      }
+      // On Linux, returns terminals based on available tools (xdotool/wmctrl)
+      // or empty array if none are available
     });
 
-    it('should return exactly 3 terminals', () => {
+    it('should return appropriate number of terminals for platform', () => {
       const terminals = getSupportedTerminals();
-      expect(terminals).toHaveLength(3);
+      if (process.platform === 'darwin') {
+        expect(terminals).toHaveLength(3);
+      } else if (process.platform === 'linux') {
+        // On Linux, depends on whether xdotool/wmctrl are installed
+        expect(terminals.length).toBeGreaterThanOrEqual(0);
+      } else {
+        expect(terminals).toHaveLength(0);
+      }
     });
   });
 
@@ -167,16 +179,14 @@ describe('focus', () => {
     });
 
     it('should return false for invalid tty path', () => {
-      // Only test on macOS where this check is reached
-      if (process.platform === 'darwin') {
-        expect(focusSession('/invalid/path')).toBe(false);
-        expect(focusSession('')).toBe(false);
-      }
+      // This validation now happens on all platforms
+      expect(focusSession('/invalid/path')).toBe(false);
+      expect(focusSession('')).toBe(false);
     });
 
-    it('should return false on non-macOS platform', () => {
+    it('should return false on unsupported platform', () => {
       Object.defineProperty(process, 'platform', {
-        value: 'linux',
+        value: 'win32',
       });
       expect(focusSession('/dev/pts/0')).toBe(false);
     });

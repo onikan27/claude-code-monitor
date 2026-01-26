@@ -1,5 +1,10 @@
 import { accessSync, constants, writeFileSync } from 'node:fs';
 import { executeAppleScript } from './applescript.js';
+import {
+  focusSessionLinux,
+  getSupportedTerminalsLinux,
+  isLinuxFocusAvailable,
+} from './linux-terminal.js';
 import { executeWithTerminalFallback } from './terminal-strategy.js';
 
 /**
@@ -197,17 +202,44 @@ export function isMacOS(): boolean {
   return process.platform === 'darwin';
 }
 
+export function isLinux(): boolean {
+  return process.platform === 'linux';
+}
+
 export function focusSession(tty: string): boolean {
-  if (!isMacOS()) return false;
   if (!isValidTtyPath(tty)) return false;
 
-  return executeWithTerminalFallback({
-    iTerm2: () => focusITerm2(tty),
-    terminalApp: () => focusTerminalApp(tty),
-    ghostty: () => focusGhostty(tty),
-  });
+  if (isMacOS()) {
+    return executeWithTerminalFallback({
+      iTerm2: () => focusITerm2(tty),
+      terminalApp: () => focusTerminalApp(tty),
+      ghostty: () => focusGhostty(tty),
+    });
+  }
+
+  if (isLinux()) {
+    return focusSessionLinux(tty);
+  }
+
+  return false;
 }
 
 export function getSupportedTerminals(): string[] {
-  return ['iTerm2', 'Terminal.app', 'Ghostty'];
+  if (isMacOS()) {
+    return ['iTerm2', 'Terminal.app', 'Ghostty'];
+  }
+  if (isLinux()) {
+    return getSupportedTerminalsLinux();
+  }
+  return [];
+}
+
+export function isFocusAvailable(): boolean {
+  if (isMacOS()) {
+    return true; // AppleScript is always available on macOS
+  }
+  if (isLinux()) {
+    return isLinuxFocusAvailable();
+  }
+  return false;
 }

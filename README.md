@@ -3,6 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/claude-code-monitor.svg)](https://www.npmjs.com/package/claude-code-monitor)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
+[![Linux](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](https://www.linux.org/)
 
 **Monitor multiple Claude Code sessions in real-time from your terminal or smartphone.**
 
@@ -39,11 +40,26 @@ Control from your phone (same Wi-Fi required)
 
 ## 📋 Requirements
 
-> **Note**: This tool is **macOS only** due to its use of AppleScript for terminal control.
-
-- **macOS**
+- **macOS** or **Linux**
 - **Node.js** >= 18.0.0
 - **Claude Code** installed
+
+### Linux Requirements (for focus/keystroke features)
+
+The terminal focus and keystroke features require `xdotool` on Linux:
+
+```bash
+# Debian/Ubuntu
+sudo apt install xdotool
+
+# Fedora
+sudo dnf install xdotool
+
+# Arch
+sudo pacman -S xdotool
+```
+
+> **Note**: The core monitoring functionality works without `xdotool`. Only the terminal focus and send-text features require it.
 
 ---
 
@@ -123,7 +139,7 @@ Monitor and control Claude Code sessions from your smartphone.
 
 ### Security
 
-> **Important**: Your smartphone and Mac must be on the **same Wi-Fi network**.
+> **Important**: Your smartphone and computer must be on the **same Wi-Fi network**.
 
 - **Token Authentication** - A unique token is generated for authentication
 - **Local Network Only** - Not accessible from the internet
@@ -135,13 +151,21 @@ Monitor and control Claude Code sessions from your smartphone.
 
 ## 🖥️ Supported Terminals
 
+### macOS
+
 | Terminal | Focus Support | Notes |
 |----------|--------------|-------|
 | iTerm2 | ✅ Full | TTY-based window/tab targeting |
 | Terminal.app | ✅ Full | TTY-based window/tab targeting |
 | Ghostty | ✅ Full | Title-based window targeting via Window menu |
 
-> Other terminals can use monitoring, but focus feature is not supported.
+### Linux
+
+| Terminal | Focus Support | Notes |
+|----------|--------------|-------|
+| Any terminal | ✅ (with xdotool) | Process-based window targeting |
+
+> Monitoring works with all terminals. Focus feature requires xdotool on Linux.
 
 ### Ghostty Users
 
@@ -170,11 +194,17 @@ If you skipped this during setup and want to enable it later, add the setting ma
 2. Check `~/.claude/settings.json` for hook settings
 3. Restart Claude Code
 
-### Focus not working
+### Focus not working (macOS)
 
 1. Verify you're using a supported terminal
 2. Check System Preferences > Privacy & Security > Accessibility
    - Ensure your terminal app has Accessibility permission
+
+### Focus not working (Linux)
+
+1. Install xdotool: `sudo apt install xdotool`
+2. Ensure you're running an X11 or XWayland session
+   - Wayland-only sessions may have limited support
 
 ### Reset data
 
@@ -194,7 +224,7 @@ ccm clear
 
 - **No data sent to external servers** - All data stays on your machine
 - Hook registration modifies `~/.claude/settings.json`
-- Focus feature uses AppleScript for terminal control
+- Focus feature uses AppleScript (macOS) or xdotool (Linux) for terminal control
 - Mobile Web uses token authentication on local network only
 - Server-side validation blocks dangerous shell commands
 

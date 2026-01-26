@@ -1,11 +1,17 @@
 import { executeAppleScript } from './applescript.js';
 import {
   generateTitleTag,
+  isLinux,
   isMacOS,
   isValidTtyPath,
   sanitizeForAppleScript,
   setTtyTitle,
 } from './focus.js';
+import {
+  hasXdotool,
+  sendKeystrokeToTerminalLinux,
+  sendTextToTerminalLinux,
+} from './linux-terminal.js';
 import { executeWithTerminalFallback } from './terminal-strategy.js';
 
 /**
@@ -345,14 +351,16 @@ function sendKeystrokeToGhostty(
 
 /**
  * Send text to a terminal session and execute it (press Enter).
- * Tries iTerm2, Terminal.app, and Ghostty in order.
+ * On macOS: Tries iTerm2, Terminal.app, and Ghostty in order.
+ * On Linux: Uses xdotool if available.
  *
  * @param tty - The TTY path of the target terminal session
  * @param text - The text to send to the terminal
- * @returns true if text was sent successfully, false otherwise
+ * @returns Result object with success status and optional error message
  *
  * @remarks
- * - This is macOS only (uses AppleScript)
+ * - macOS: Uses AppleScript for iTerm2, Terminal.app, and Ghostty
+ * - Linux: Uses xdotool (must be installed)
  * - For iTerm2 and Terminal.app, targets specific TTY
  * - For Ghostty, sends to the active window (TTY targeting not supported)
  * - System Events usage for Ghostty may require accessibility permissions
@@ -361,10 +369,6 @@ export function sendTextToTerminal(
   tty: string,
   text: string
 ): { success: boolean; error?: string } {
-  if (!isMacOS()) {
-    return { success: false, error: 'This feature is only available on macOS' };
-  }
-
   if (!isValidTtyPath(tty)) {
     return { success: false, error: 'Invalid TTY path' };
   }
@@ -374,15 +378,32 @@ export function sendTextToTerminal(
     return { success: false, error: validation.error };
   }
 
-  const success = executeWithTerminalFallback({
-    iTerm2: () => sendTextToITerm2(tty, text),
-    terminalApp: () => sendTextToTerminalApp(tty, text),
-    ghostty: () => sendTextToGhostty(tty, text),
-  });
+  if (isMacOS()) {
+    const success = executeWithTerminalFallback({
+      iTerm2: () => sendTextToITerm2(tty, text),
+      terminalApp: () => sendTextToTerminalApp(tty, text),
+      ghostty: () => sendTextToGhostty(tty, text),
+    });
 
-  return success
-    ? { success: true }
-    : { success: false, error: 'Could not send text to any terminal' };
+    return success
+      ? { success: true }
+      : { success: false, error: 'Could not send text to any terminal' };
+  }
+
+  if (isLinux()) {
+    if (!hasXdotool()) {
+      return {
+        success: false,
+        error: 'xdotool is required on Linux. Install with: sudo apt install xdotool',
+      };
+    }
+    const success = sendTextToTerminalLinux(tty, text);
+    return success
+      ? { success: true }
+      : { success: false, error: 'Could not send text to terminal' };
+  }
+
+  return { success: false, error: 'This feature is only available on macOS and Linux' };
 }
 
 /**
@@ -423,10 +444,6 @@ export function sendKeystrokeToTerminal(
   key: string,
   useControl = false
 ): { success: boolean; error?: string } {
-  if (!isMacOS()) {
-    return { success: false, error: 'This feature is only available on macOS' };
-  }
-
   if (!isValidTtyPath(tty)) {
     return { success: false, error: 'Invalid TTY path' };
   }
@@ -449,16 +466,33 @@ export function sendKeystrokeToTerminal(
     return { success: false, error: 'Only Ctrl+C is supported' };
   }
 
-  // Determine if we need to use key code (for Escape key)
-  const useKeyCode = isEscapeKey ? ESCAPE_KEY_CODE : undefined;
+  if (isMacOS()) {
+    // Determine if we need to use key code (for Escape key)
+    const useKeyCode = isEscapeKey ? ESCAPE_KEY_CODE : undefined;
 
-  const success = executeWithTerminalFallback({
-    iTerm2: () => sendKeystrokeToITerm2(tty, key, useControl, useKeyCode),
-    terminalApp: () => sendKeystrokeToTerminalApp(tty, key, useControl, useKeyCode),
-    ghostty: () => sendKeystrokeToGhostty(tty, key, useControl, useKeyCode),
-  });
+    const success = executeWithTerminalFallback({
+      iTerm2: () => sendKeystrokeToITerm2(tty, key, useControl, useKeyCode),
+      terminalApp: () => sendKeystrokeToTerminalApp(tty, key, useControl, useKeyCode),
+      ghostty: () => sendKeystrokeToGhostty(tty, key, useControl, useKeyCode),
+    });
 
-  return success
-    ? { success: true }
-    : { success: false, error: 'Could not send keystroke to any terminal' };
+    return success
+      ? { success: true }
+      : { success: false, error: 'Could not send keystroke to any terminal' };
+  }
+
+  if (isLinux()) {
+    if (!hasXdotool()) {
+      return {
+        success: false,
+        error: 'xdotool is required on Linux. Install with: sudo apt install xdotool',
+      };
+    }
+    const success = sendKeystrokeToTerminalLinux(tty, key, useControl);
+    return success
+      ? { success: true }
+      : { success: false, error: 'Could not send keystroke to terminal' };
+  }
+
+  return { success: false, error: 'This feature is only available on macOS and Linux' };
 }
