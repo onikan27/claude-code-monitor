@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-01-27
+
+### Added
+
+- **Tailscale support** for secure remote mobile access
+  - New `-t, --tailscale` option to prefer Tailscale IP for mobile server
+  - Access mobile web UI from anywhere in your Tailnet (not just local Wi-Fi)
+  - WireGuard encryption provides secure communication over any network
+  - Automatic fallback to local IP if Tailscale is not connected
+
+### Changed
+
+- Extract `resolveServerIP()` function to reduce code duplication
+- Unify `DEFAULT_SERVER_PORT` constant in `src/constants.ts`
+
 ## [1.1.11] - 2026-01-26
 
 ### Fixed

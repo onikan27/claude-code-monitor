@@ -2,20 +2,19 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { networkInterfaces } from 'node:os';
 import { dirname, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chokidar from 'chokidar';
 import qrcode from 'qrcode-terminal';
 import { type WebSocket, WebSocketServer } from 'ws';
+import { DEFAULT_SERVER_PORT } from '../constants.js';
 import { clearSessions, getSessions, getStorePath } from '../store/file-store.js';
 import type { Session } from '../types/index.js';
 import { focusSession } from '../utils/focus.js';
+import { getLocalIP, getTailscaleIP } from '../utils/network.js';
 import { sendKeystrokeToTerminal, sendTextToTerminal } from '../utils/send-text.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-const DEFAULT_PORT = 3456;
 const MAX_PORT_ATTEMPTS = 10;
 
 /**
@@ -267,21 +266,40 @@ function setupWebSocketHandlers(wss: WebSocketServer, validToken: string): void 
   });
 }
 
+export interface ServerOptions {
+  port?: number;
+  preferTailscale?: boolean;
+}
+
 export interface ServerInfo {
   url: string;
   qrCode: string;
   token: string;
   port: number;
+  ip: string;
+  tailscaleIP: string | null;
+  localIP: string;
   stop: () => void;
 }
 
-function getLocalIP(): string {
-  const interfaces = networkInterfaces();
-  const allAddresses = Object.values(interfaces)
-    .flat()
-    .filter((info): info is NonNullable<typeof info> => info != null);
-  const externalIPv4 = allAddresses.find((info) => info.family === 'IPv4' && !info.internal);
-  return externalIPv4?.address ?? 'localhost';
+interface ResolvedAddresses {
+  ip: string;
+  localIP: string;
+  tailscaleIP: string | null;
+}
+
+/**
+ * Resolve server IP address based on preference.
+ * If preferTailscale is true, attempts to use Tailscale IP, falling back to local IP.
+ */
+function resolveServerIP(preferTailscale: boolean): ResolvedAddresses {
+  const localIP = getLocalIP();
+  const tailscaleIP = preferTailscale ? getTailscaleIP() : null;
+  return {
+    ip: tailscaleIP ?? localIP,
+    localIP,
+    tailscaleIP,
+  };
 }
 
 function generateQRCode(text: string): Promise<string> {
@@ -391,17 +409,19 @@ function stopServerComponents({ watcher, wss, server }: ServerComponents): void 
   server.close();
 }
 
-export async function createMobileServer(port = DEFAULT_PORT): Promise<ServerInfo> {
-  const localIP = getLocalIP();
-  const actualPort = await findAvailablePort(port, localIP);
+export async function createMobileServer(options: ServerOptions = {}): Promise<ServerInfo> {
+  const { port = DEFAULT_SERVER_PORT, preferTailscale = false } = options;
+  const { ip, localIP, tailscaleIP } = resolveServerIP(preferTailscale);
+
+  const actualPort = await findAvailablePort(port, ip);
   const token = generateAuthToken();
-  const url = `http://${localIP}:${actualPort}?token=${token}`;
+  const url = `http://${ip}:${actualPort}?token=${token}`;
   const qrCode = await generateQRCode(url);
 
   const components = createServerComponents(token);
 
   await new Promise<void>((resolve) => {
-    components.server.listen(actualPort, localIP, resolve);
+    components.server.listen(actualPort, ip, resolve);
   });
 
   return {
@@ -409,24 +429,32 @@ export async function createMobileServer(port = DEFAULT_PORT): Promise<ServerInf
     qrCode,
     token,
     port: actualPort,
+    ip,
+    tailscaleIP,
+    localIP,
     stop: () => stopServerComponents(components),
   };
 }
 
 // CLI standalone mode
-export async function startServer(port = DEFAULT_PORT): Promise<void> {
-  const localIP = getLocalIP();
-  const actualPort = await findAvailablePort(port, localIP);
+export async function startServer(options: ServerOptions = {}): Promise<void> {
+  const { port = DEFAULT_SERVER_PORT, preferTailscale = false } = options;
+  const { ip, tailscaleIP } = resolveServerIP(preferTailscale);
+
+  const actualPort = await findAvailablePort(port, ip);
   const token = generateAuthToken();
-  const url = `http://${localIP}:${actualPort}?token=${token}`;
+  const url = `http://${ip}:${actualPort}?token=${token}`;
 
   const components = createServerComponents(token);
 
-  components.server.listen(actualPort, localIP, () => {
+  components.server.listen(actualPort, ip, () => {
     console.log('\n  Claude Code Monitor - Mobile Web Interface\n');
     console.log(`  Server running at: ${url}\n`);
     if (actualPort !== port) {
       console.log(`  (Port ${port} was in use, using ${actualPort} instead)\n`);
+    }
+    if (tailscaleIP) {
+      console.log(`  Tailscale: ${tailscaleIP} (accessible from anywhere in your Tailnet)\n`);
     }
     console.log('  Scan this QR code with your phone:\n');
     qrcode.generate(url, { small: true });

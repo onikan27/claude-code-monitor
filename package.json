@@ -1,6 +1,6 @@
 {
   "name": "claude-code-monitor",
-  "version": "1.1.11",
+  "version": "1.2.0",
   "description": "CLI for monitoring multiple Claude Code sessions in real-time",
   "type": "module",
   "main": "dist/index.js",

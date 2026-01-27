@@ -13,11 +13,13 @@ const QUICK_SELECT_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 interface DashboardProps {
   /** Override default QR code visibility (e.g., from --qr CLI flag) */
   initialShowQr?: boolean;
+  /** Prefer Tailscale IP for mobile access */
+  preferTailscale?: boolean;
 }
 
-export function Dashboard({ initialShowQr }: DashboardProps): React.ReactElement {
+export function Dashboard({ initialShowQr, preferTailscale }: DashboardProps): React.ReactElement {
   const { sessions, loading, error } = useSessions();
-  const { url, qrCode, loading: serverLoading } = useServer();
+  const { url, qrCode, tailscaleIP, loading: serverLoading } = useServer({ preferTailscale });
   const [selectedIndex, setSelectedIndex] = useState(0);
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -198,8 +200,11 @@ export function Dashboard({ initialShowQr }: DashboardProps): React.ReactElement
             <Text dimColor>{url}</Text>
             <Text dimColor>Scan QR code to monitor sessions from your phone.</Text>
             <Text dimColor>Tap a session to focus its terminal on this Mac.</Text>
-            <Text color="yellow">⚠ Do not share this URL with others.</Text>
-            {!canShowQr && <Text color="yellow">⚠ Resize window to show QR code</Text>}
+            {tailscaleIP && (
+              <Text color="green">Tailscale: accessible from anywhere in your Tailnet</Text>
+            )}
+            <Text color="yellow">Do not share this URL with others.</Text>
+            {!canShowQr && <Text color="yellow">Resize window to show QR code</Text>}
           </Box>
         </Box>
       )}

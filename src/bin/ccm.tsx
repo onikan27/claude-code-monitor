@@ -49,6 +49,7 @@ function getTtyFromAncestors(): string | undefined {
 
 interface DashboardOptions {
   qr?: boolean;
+  preferTailscale?: boolean;
 }
 
 /**
@@ -59,12 +60,17 @@ async function runWithAltScreen(options: DashboardOptions = {}) {
   // カーソルを非表示にして、より安定したレンダリングを行う
   process.stdout.write('\x1b[?25l');
 
-  const instance = render(<Dashboard initialShowQr={options.qr} />, { patchConsole: false });
+  const instance = render(
+    <Dashboard initialShowQr={options.qr} preferTailscale={options.preferTailscale} />,
+    { patchConsole: false }
+  );
 
   // リサイズ時にInkの描画をクリアして再描画
   const handleResize = () => {
     instance.clear();
-    instance.rerender(<Dashboard initialShowQr={options.qr} />);
+    instance.rerender(
+      <Dashboard initialShowQr={options.qr} preferTailscale={options.preferTailscale} />
+    );
   };
   process.stdout.on('resize', handleResize);
 
@@ -84,15 +90,17 @@ program
   .name('ccm')
   .description('Claude Code Monitor - CLI-based session monitoring')
   .version(pkg.version)
-  .option('--qr', 'Show QR code for mobile access');
+  .option('--qr', 'Show QR code for mobile access')
+  .option('-t, --tailscale', 'Prefer Tailscale IP for mobile access');
 
 program
   .command('watch')
   .alias('w')
   .description('Start the monitoring TUI')
   .option('--qr', 'Show QR code for mobile access')
-  .action(async (options: { qr?: boolean }) => {
-    await runWithAltScreen({ qr: options.qr });
+  .option('-t, --tailscale', 'Prefer Tailscale IP for mobile access')
+  .action(async (options: { qr?: boolean; tailscale?: boolean }) => {
+    await runWithAltScreen({ qr: options.qr, preferTailscale: options.tailscale });
   });
 
 program
@@ -145,9 +153,10 @@ program
   .alias('s')
   .description('Start web server for mobile monitoring')
   .option('-p, --port <port>', 'Port number', '3456')
-  .action(async (options: { port: string }) => {
+  .option('-t, --tailscale', 'Prefer Tailscale IP for mobile access')
+  .action(async (options: { port: string; tailscale?: boolean }) => {
     const port = parseInt(options.port, 10);
-    await startServer(port);
+    await startServer({ port, preferTailscale: options.tailscale });
   });
 
 /**
@@ -177,8 +186,8 @@ async function defaultAction(options: DashboardOptions = {}) {
 
 // Handle default action (no subcommand)
 program.action(async () => {
-  const options = program.opts<{ qr?: boolean }>();
-  await defaultAction({ qr: options.qr });
+  const options = program.opts<{ qr?: boolean; tailscale?: boolean }>();
+  await defaultAction({ qr: options.qr, preferTailscale: options.tailscale });
 });
 
 program.parse();

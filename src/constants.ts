@@ -34,3 +34,6 @@ export const HOOK_EVENTS = [
   'Notification',
   'Stop',
 ] as const;
+
+/** Default port for mobile web server */
+export const DEFAULT_SERVER_PORT = 3456;
