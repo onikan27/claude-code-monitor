@@ -1,6 +1,8 @@
 import { executeAppleScript } from './applescript.js';
 import {
+  execWezTermCli,
   generateTitleTag,
+  hasWezTermCli,
   isMacOS,
   isValidTtyPath,
   sanitizeForAppleScript,
@@ -343,6 +345,166 @@ function sendKeystrokeToGhostty(
   return executeAppleScript(buildGhosttyKeystrokeScript(key, useControl, useKeyCode));
 }
 
+// ============================================
+// WezTerm Functions
+// ============================================
+
+/**
+ * Build AppleScript to focus WezTerm window by title tag in Window menu.
+ * Uses the same pattern as Ghostty: activate app, find menu item by title tag.
+ */
+function buildWezTermFocusScript(titleTag: string): string {
+  const safeTag = sanitizeForAppleScript(titleTag);
+  return `
+tell application "WezTerm" to activate
+delay 0.1
+
+tell application "System Events"
+  if not (exists process "wezterm-gui") then
+    return false
+  end if
+  tell process "wezterm-gui"
+    try
+      set windowMenu to menu "Window" of menu bar 1
+      set menuItems to every menu item of windowMenu whose name contains "${safeTag}"
+      if (count of menuItems) > 0 then
+        click item 1 of menuItems
+        delay 0.05
+        click item 1 of menuItems
+        delay 0.05
+        try
+          perform action "AXRaise" of window 1
+        end try
+        return true
+      end if
+    end try
+  end tell
+end tell
+return false
+`;
+}
+
+/**
+ * Build AppleScript to send text to WezTerm via clipboard paste.
+ * Uses clipboard and Cmd+V to paste text, then sends Enter key.
+ */
+function buildWezTermSendTextScript(text: string): string {
+  const safeText = sanitizeForAppleScript(text);
+  return `
+set the clipboard to "${safeText}"
+delay 0.1
+tell application "System Events"
+  tell process "wezterm-gui"
+    keystroke "v" using command down
+    delay 0.2
+    keystroke return
+  end tell
+end tell
+return true
+`;
+}
+
+/**
+ * Send text to WezTerm terminal.
+ * Prefers CLI send-text when available (no clipboard pollution),
+ * falls back to AppleScript clipboard paste.
+ */
+function sendTextToWezTerm(tty: string, text: string, weztermPaneId?: string): boolean {
+  // CLI path: direct send-text (no clipboard pollution!)
+  if (hasWezTermCli() && weztermPaneId) {
+    const result = execWezTermCli([
+      'cli',
+      'send-text',
+      '--pane-id',
+      weztermPaneId,
+      '--no-paste',
+      `${text}\n`,
+    ]);
+    if (result !== null) return true;
+  }
+
+  // AppleScript fallback: focus via title-tag, then clipboard paste
+  const titleTag = generateTitleTag(tty);
+  const titleSet = setTtyTitle(tty, titleTag);
+
+  if (titleSet) {
+    const waitScript = 'delay 0.2';
+    executeAppleScript(waitScript);
+  }
+
+  const focusScript = buildWezTermFocusScript(titleTag);
+  executeAppleScript(focusScript);
+
+  if (titleSet) {
+    setTtyTitle(tty, '');
+  }
+
+  return executeAppleScript(buildWezTermSendTextScript(text));
+}
+
+/**
+ * Build AppleScript to send a single keystroke to WezTerm.
+ */
+function buildWezTermKeystrokeScript(key: string, useControl = false, useKeyCode?: number): string {
+  const safeKey = sanitizeForAppleScript(key);
+  const modifiers = useControl ? ' using control down' : '';
+  const keystrokeCmd =
+    useKeyCode !== undefined ? `key code ${useKeyCode}` : `keystroke "${safeKey}"${modifiers}`;
+  return `
+delay 0.1
+tell application "System Events"
+  tell process "wezterm-gui"
+    ${keystrokeCmd}
+  end tell
+end tell
+return true
+`;
+}
+
+/**
+ * Send a single keystroke to WezTerm.
+ * Prefers CLI send-text for simple character keys,
+ * falls back to AppleScript for special keys and Ctrl+C.
+ */
+function sendKeystrokeToWezTerm(
+  tty: string,
+  key: string,
+  useControl = false,
+  useKeyCode?: number,
+  weztermPaneId?: string
+): boolean {
+  // CLI path: for simple character keys, use send-text
+  if (hasWezTermCli() && weztermPaneId && useKeyCode === undefined && !useControl) {
+    const result = execWezTermCli([
+      'cli',
+      'send-text',
+      '--pane-id',
+      weztermPaneId,
+      '--no-paste',
+      key,
+    ]);
+    if (result !== null) return true;
+  }
+
+  // AppleScript path: for special keys (arrows, escape, enter) and Ctrl+C
+  const titleTag = generateTitleTag(tty);
+  const titleSet = setTtyTitle(tty, titleTag);
+
+  if (titleSet) {
+    const waitScript = 'delay 0.2';
+    executeAppleScript(waitScript);
+  }
+
+  const focusScript = buildWezTermFocusScript(titleTag);
+  executeAppleScript(focusScript);
+
+  if (titleSet) {
+    setTtyTitle(tty, '');
+  }
+
+  return executeAppleScript(buildWezTermKeystrokeScript(key, useControl, useKeyCode));
+}
+
 /**
  * Send text to a terminal session and execute it (press Enter).
  * Tries iTerm2, Terminal.app, and Ghostty in order.
@@ -378,6 +540,7 @@ export function sendTextToTerminal(
     iTerm2: () => sendTextToITerm2(tty, text),
     terminalApp: () => sendTextToTerminalApp(tty, text),
     ghostty: () => sendTextToGhostty(tty, text),
+    wezterm: () => sendTextToWezTerm(tty, text),
   });
 
   return success
@@ -486,6 +649,7 @@ export function sendKeystrokeToTerminal(
     iTerm2: () => sendKeystrokeToITerm2(tty, key, useControl, useKeyCode),
     terminalApp: () => sendKeystrokeToTerminalApp(tty, key, useControl, useKeyCode),
     ghostty: () => sendKeystrokeToGhostty(tty, key, useControl, useKeyCode),
+    wezterm: () => sendKeystrokeToWezTerm(tty, key, useControl, useKeyCode),
   });
 
   return success

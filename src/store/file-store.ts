@@ -174,6 +174,7 @@ export function updateSession(event: HookEvent): Session {
     session_id: event.session_id,
     cwd: event.cwd,
     tty: event.tty ?? existing?.tty,
+    wezterm_pane_id: event.wezterm_pane_id ?? existing?.wezterm_pane_id,
     status: determineStatus(event, existing?.status),
     created_at: existing?.created_at ?? now,
     updated_at: now,

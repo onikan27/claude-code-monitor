@@ -7,16 +7,22 @@ export interface TerminalOperations {
   iTerm2: () => boolean;
   terminalApp: () => boolean;
   ghostty: () => boolean;
+  wezterm: () => boolean;
 }
 
 /**
  * Execute terminal operation with fallback strategy.
- * Tries iTerm2 → Terminal.app → Ghostty in order, returning on first success.
+ * Tries iTerm2 → Terminal.app → Ghostty → WezTerm in order, returning on first success.
  *
  * @param operations - Terminal-specific operation functions
  * @returns true if any terminal operation succeeded, false otherwise
  */
 export function executeWithTerminalFallback(operations: TerminalOperations): boolean {
-  const strategies = [operations.iTerm2, operations.terminalApp, operations.ghostty];
+  const strategies = [
+    operations.iTerm2,
+    operations.terminalApp,
+    operations.ghostty,
+    operations.wezterm,
+  ];
   return strategies.some((op) => op());
 }

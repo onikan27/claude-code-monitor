@@ -220,6 +220,39 @@ return ""
 }
 
 /**
+ * Build AppleScript to find WezTerm window bounds by TTY (using title tag).
+ * Returns "x, y, width, height" format.
+ * @internal
+ */
+function buildWezTermWindowBoundsScript(titleTag: string): string {
+  const safeTag = sanitizeForAppleScript(titleTag);
+  return `
+tell application "System Events"
+  if not (exists process "wezterm-gui") then return ""
+  tell process "wezterm-gui"
+    repeat with sysWindow in windows
+      try
+        set windowTitle to name of sysWindow
+        if windowTitle contains "${safeTag}" then
+          set pos to position of sysWindow
+          set sz to size of sysWindow
+          return (item 1 of pos as text) & ", " & (item 2 of pos as text) & ", " & (item 1 of sz as text) & ", " & (item 2 of sz as text)
+        end if
+      end try
+    end repeat
+    if (count of windows) > 0 then
+      set sysWindow to window 1
+      set pos to position of sysWindow
+      set sz to size of sysWindow
+      return (item 1 of pos as text) & ", " & (item 2 of pos as text) & ", " & (item 1 of sz as text) & ", " & (item 2 of sz as text)
+    end if
+  end tell
+end tell
+return ""
+`;
+}
+
+/**
  * Capture iTerm2 window by TTY using region capture.
  * @internal
  */
@@ -275,6 +308,35 @@ async function captureGhostty(tty: string): Promise<string | null> {
 }
 
 /**
+ * Capture WezTerm window by TTY using region capture.
+ * @internal
+ */
+async function captureWezTerm(tty: string): Promise<string | null> {
+  const titleTag = generateTitleTag(tty);
+
+  // Set title tag for window identification
+  const titleSet = setTtyTitle(tty, titleTag);
+
+  if (titleSet) {
+    // Wait for title to propagate
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+
+  const script = buildWezTermWindowBoundsScript(titleTag);
+  const result = executeAppleScriptWithResult(script);
+
+  // Clear title to let shell restore it
+  if (titleSet) {
+    setTtyTitle(tty, '');
+  }
+
+  if (!result) return null;
+  const bounds = parseWindowBounds(result);
+  if (!bounds) return null;
+  return await captureRegion(bounds);
+}
+
+/**
  * Capture the terminal window associated with a TTY.
  * Identifies the correct terminal by matching TTY, then captures that specific window.
  *
@@ -300,6 +362,9 @@ export async function captureTerminalScreen(tty: string): Promise<string | null>
 
   const result3 = await captureGhostty(tty);
   if (result3) return result3;
+
+  const result4 = await captureWezTerm(tty);
+  if (result4) return result4;
 
   return null;
 }

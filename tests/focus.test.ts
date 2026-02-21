@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  execWezTermCli,
   focusSession,
   generateOscTitleSequence,
   generateTitleTag,
   getSupportedTerminals,
+  hasWezTermCli,
   isMacOS,
   isValidTtyPath,
   sanitizeForAppleScript,
@@ -149,11 +151,32 @@ describe('focus', () => {
       expect(terminals).toContain('iTerm2');
       expect(terminals).toContain('Terminal.app');
       expect(terminals).toContain('Ghostty');
+      expect(terminals).toContain('WezTerm');
     });
 
-    it('should return exactly 3 terminals', () => {
+    it('should return exactly 4 terminals', () => {
       const terminals = getSupportedTerminals();
-      expect(terminals).toHaveLength(3);
+      expect(terminals).toHaveLength(4);
+    });
+  });
+
+  describe('hasWezTermCli', () => {
+    it('should return a boolean', () => {
+      const result = hasWezTermCli();
+      expect(typeof result).toBe('boolean');
+    });
+
+    it('should return consistent results (cached)', () => {
+      const first = hasWezTermCli();
+      const second = hasWezTermCli();
+      expect(first).toBe(second);
+    });
+  });
+
+  describe('execWezTermCli', () => {
+    it('should return null for invalid command', () => {
+      const result = execWezTermCli(['--invalid-command-that-does-not-exist']);
+      expect(result).toBeNull();
     });
   });
 
@@ -179,6 +202,13 @@ describe('focus', () => {
         value: 'linux',
       });
       expect(focusSession('/dev/pts/0')).toBe(false);
+    });
+
+    it('should accept optional weztermPaneId parameter', () => {
+      if (process.platform === 'darwin') {
+        // Should not throw when weztermPaneId is provided
+        expect(focusSession('/invalid/path', '42')).toBe(false);
+      }
     });
   });
 });

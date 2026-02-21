@@ -66,6 +66,7 @@ export async function handleHookEvent(eventName: string, tty?: string): Promise<
     session_id: rawInput.session_id,
     cwd,
     tty,
+    wezterm_pane_id: process.env.WEZTERM_PANE || undefined,
     hook_event_name: eventName,
     notification_type: rawInput.notification_type as string | undefined,
     transcript_path: transcriptPath,

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { accessSync, constants, writeFileSync } from 'node:fs';
 import { executeAppleScript } from './applescript.js';
 import { executeWithTerminalFallback } from './terminal-strategy.js';
@@ -71,6 +72,46 @@ export function setTtyTitle(tty: string, title: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Cached result of WezTerm CLI availability check.
+ * @internal
+ */
+let wezTermCliAvailable: boolean | null = null;
+
+/**
+ * Check if the `wezterm` CLI binary is available on PATH.
+ * Result is cached after first invocation.
+ */
+export function hasWezTermCli(): boolean {
+  if (wezTermCliAvailable !== null) return wezTermCliAvailable;
+  try {
+    execFileSync('wezterm', ['--version'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 5000,
+    });
+    wezTermCliAvailable = true;
+  } catch {
+    wezTermCliAvailable = false;
+  }
+  return wezTermCliAvailable;
+}
+
+/**
+ * Execute a WezTerm CLI command and return trimmed stdout, or null on failure.
+ */
+export function execWezTermCli(args: string[]): string | null {
+  try {
+    return execFileSync('wezterm', args, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 10000,
+    }).trim();
+  } catch {
+    return null;
   }
 }
 
@@ -193,11 +234,92 @@ function focusGhostty(tty: string): boolean {
   return executeAppleScript(buildGhosttyScript());
 }
 
+function buildWezTermActivateScript(): string {
+  return `
+tell application "WezTerm" to activate
+return true
+`;
+}
+
+function buildWezTermFocusByTitleScript(titleTag: string): string {
+  const safeTag = sanitizeForAppleScript(titleTag);
+  return `
+tell application "WezTerm" to activate
+delay 0.1
+
+tell application "System Events"
+  if not (exists process "wezterm-gui") then
+    return false
+  end if
+  tell process "wezterm-gui"
+    try
+      set windowMenu to menu "Window" of menu bar 1
+      set menuItems to every menu item of windowMenu whose name contains "${safeTag}"
+      if (count of menuItems) > 0 then
+        click item 1 of menuItems
+        delay 0.05
+        click item 1 of menuItems
+        delay 0.05
+        try
+          perform action "AXRaise" of window 1
+        end try
+        return true
+      end if
+    end try
+  end tell
+end tell
+return false
+`;
+}
+
+function focusWezTermViaCli(weztermPaneId: string): boolean {
+  const listOutput = execWezTermCli(['cli', 'list', '--format', 'json']);
+  if (!listOutput) return false;
+  try {
+    const panes = JSON.parse(listOutput) as Array<{ pane_id: number; tab_id: number }>;
+    const pane = panes.find((p) => p.pane_id === Number.parseInt(weztermPaneId, 10));
+    if (!pane) return false;
+    execWezTermCli(['cli', 'activate-tab', '--tab-id', String(pane.tab_id)]);
+    execWezTermCli(['cli', 'activate-pane', '--pane-id', weztermPaneId]);
+    executeAppleScript(buildWezTermActivateScript());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function focusWezTerm(tty: string, weztermPaneId?: string): boolean {
+  // CLI path: precise pane targeting when binary and pane ID are available
+  if (hasWezTermCli() && weztermPaneId && focusWezTermViaCli(weztermPaneId)) {
+    return true;
+  }
+
+  // AppleScript fallback: title-tag + Window menu (same pattern as Ghostty)
+  const titleTag = generateTitleTag(tty);
+  const titleSet = setTtyTitle(tty, titleTag);
+
+  if (titleSet) {
+    const waitScript = 'delay 0.2';
+    executeAppleScript(waitScript);
+  }
+
+  const success = executeAppleScript(buildWezTermFocusByTitleScript(titleTag));
+
+  if (titleSet) {
+    setTtyTitle(tty, '');
+  }
+
+  if (success) return true;
+
+  // Last resort: just activate WezTerm without specific pane focus
+  return executeAppleScript(buildWezTermActivateScript());
+}
+
 export function isMacOS(): boolean {
   return process.platform === 'darwin';
 }
 
-export function focusSession(tty: string): boolean {
+export function focusSession(tty: string, weztermPaneId?: string): boolean {
   if (!isMacOS()) return false;
   if (!isValidTtyPath(tty)) return false;
 
@@ -205,9 +327,10 @@ export function focusSession(tty: string): boolean {
     iTerm2: () => focusITerm2(tty),
     terminalApp: () => focusTerminalApp(tty),
     ghostty: () => focusGhostty(tty),
+    wezterm: () => focusWezTerm(tty, weztermPaneId),
   });
 }
 
 export function getSupportedTerminals(): string[] {
-  return ['iTerm2', 'Terminal.app', 'Ghostty'];
+  return ['iTerm2', 'Terminal.app', 'Ghostty', 'WezTerm'];
 }
