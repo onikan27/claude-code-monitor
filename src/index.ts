@@ -15,10 +15,8 @@ export type {
   StoreData,
 } from './types/index.js';
 export {
-  execWezTermCli,
   focusSession,
   getSupportedTerminals,
-  hasWezTermCli,
   isMacOS,
 } from './utils/focus.js';
 export { sendTextToTerminal } from './utils/send-text.js';

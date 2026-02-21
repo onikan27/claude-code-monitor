@@ -289,7 +289,7 @@ function focusWezTermViaCli(weztermPaneId: string): boolean {
     if (!Number.isSafeInteger(paneIdNum)) return false;
     const pane = panes.find(
       (p: Record<string, unknown>) => typeof p?.pane_id === 'number' && p.pane_id === paneIdNum
-    ) as { pane_id: number; tab_id: number; window_title?: string } | undefined;
+    ) as { pane_id: number; tab_id: number } | undefined;
     if (!pane) return false;
     // CLI activate-tab/pane switches focus within WezTerm
     execWezTermCli([
