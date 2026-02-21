@@ -60,7 +60,7 @@ export function Dashboard({ initialShowQr, preferTailscale }: DashboardProps): R
   const focusSessionByIndex = (index: number) => {
     const session = sessions[index];
     if (session?.tty) {
-      focusSession(session.tty);
+      focusSession(session.tty, session.wezterm_pane_id);
     }
   };
 

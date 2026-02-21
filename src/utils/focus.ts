@@ -276,9 +276,14 @@ function focusWezTermViaCli(weztermPaneId: string): boolean {
   const listOutput = execWezTermCli(['cli', 'list', '--format', 'json']);
   if (!listOutput) return false;
   try {
-    const panes = JSON.parse(listOutput) as Array<{ pane_id: number; tab_id: number }>;
-    const pane = panes.find((p) => p.pane_id === Number.parseInt(weztermPaneId, 10));
-    if (!pane) return false;
+    const panes = JSON.parse(listOutput) as unknown;
+    if (!Array.isArray(panes)) return false;
+    const paneIdNum = Number(weztermPaneId);
+    if (!Number.isSafeInteger(paneIdNum)) return false;
+    const pane = panes.find(
+      (p: Record<string, unknown>) => typeof p?.pane_id === 'number' && p.pane_id === paneIdNum
+    ) as { pane_id: number; tab_id: number } | undefined;
+    if (!pane || typeof pane.tab_id !== 'number') return false;
     execWezTermCli(['cli', 'activate-tab', '--tab-id', String(pane.tab_id)]);
     execWezTermCli(['cli', 'activate-pane', '--pane-id', weztermPaneId]);
     executeAppleScript(buildWezTermActivateScript());

@@ -507,21 +507,23 @@ function sendKeystrokeToWezTerm(
 
 /**
  * Send text to a terminal session and execute it (press Enter).
- * Tries iTerm2, Terminal.app, and Ghostty in order.
+ * Tries iTerm2, Terminal.app, Ghostty, and WezTerm in order.
  *
  * @param tty - The TTY path of the target terminal session
  * @param text - The text to send to the terminal
- * @returns true if text was sent successfully, false otherwise
+ * @param weztermPaneId - Optional WezTerm pane ID for precise CLI targeting
+ * @returns Result object with success status
  *
  * @remarks
  * - This is macOS only (uses AppleScript)
  * - For iTerm2 and Terminal.app, targets specific TTY
- * - For Ghostty, sends to the active window (TTY targeting not supported)
- * - System Events usage for Ghostty may require accessibility permissions
+ * - For Ghostty and WezTerm, uses title-tag Window menu targeting as fallback
+ * - WezTerm CLI path avoids clipboard pollution when pane ID is available
  */
 export function sendTextToTerminal(
   tty: string,
-  text: string
+  text: string,
+  weztermPaneId?: string
 ): { success: boolean; error?: string } {
   if (!isMacOS()) {
     return { success: false, error: 'This feature is only available on macOS' };
@@ -540,7 +542,7 @@ export function sendTextToTerminal(
     iTerm2: () => sendTextToITerm2(tty, text),
     terminalApp: () => sendTextToTerminalApp(tty, text),
     ghostty: () => sendTextToGhostty(tty, text),
-    wezterm: () => sendTextToWezTerm(tty, text),
+    wezterm: () => sendTextToWezTerm(tty, text, weztermPaneId),
   });
 
   return success
@@ -604,7 +606,8 @@ const ESCAPE_KEY_CODE = 53;
 export function sendKeystrokeToTerminal(
   tty: string,
   key: string,
-  useControl = false
+  useControl = false,
+  weztermPaneId?: string
 ): { success: boolean; error?: string } {
   if (!isMacOS()) {
     return { success: false, error: 'This feature is only available on macOS' };
@@ -649,7 +652,7 @@ export function sendKeystrokeToTerminal(
     iTerm2: () => sendKeystrokeToITerm2(tty, key, useControl, useKeyCode),
     terminalApp: () => sendKeystrokeToTerminalApp(tty, key, useControl, useKeyCode),
     ghostty: () => sendKeystrokeToGhostty(tty, key, useControl, useKeyCode),
-    wezterm: () => sendKeystrokeToWezTerm(tty, key, useControl, useKeyCode),
+    wezterm: () => sendKeystrokeToWezTerm(tty, key, useControl, useKeyCode, weztermPaneId),
   });
 
   return success

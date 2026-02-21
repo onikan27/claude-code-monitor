@@ -122,7 +122,7 @@ function handleFocusCommand(ws: WebSocket, sessionId: string): void {
     );
     return;
   }
-  const success = focusSession(session.tty);
+  const success = focusSession(session.tty, session.wezterm_pane_id);
   ws.send(JSON.stringify({ type: 'focusResult', success }));
 }
 
@@ -148,7 +148,7 @@ function handleSendTextCommand(ws: WebSocket, sessionId: string, text: string): 
     ws.send(JSON.stringify({ type: 'sendTextResult', success: false, error: 'Session not found' }));
     return;
   }
-  const result = sendTextToTerminal(session.tty, text);
+  const result = sendTextToTerminal(session.tty, text, session.wezterm_pane_id);
   ws.send(JSON.stringify({ type: 'sendTextResult', ...result }));
 }
 
@@ -169,7 +169,7 @@ function handleSendKeystrokeCommand(
     );
     return;
   }
-  const result = sendKeystrokeToTerminal(session.tty, key, useControl);
+  const result = sendKeystrokeToTerminal(session.tty, key, useControl, session.wezterm_pane_id);
   ws.send(JSON.stringify({ type: 'sendKeystrokeResult', ...result }));
 }
 
