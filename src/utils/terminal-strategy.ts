@@ -12,17 +12,19 @@ export interface TerminalOperations {
 
 /**
  * Execute terminal operation with fallback strategy.
- * Tries iTerm2 → Terminal.app → Ghostty → WezTerm in order, returning on first success.
+ * Default order: iTerm2 → Terminal.app → Ghostty → WezTerm.
+ * When preferWezTerm is true, WezTerm is tried first (useful when a pane ID signals the session is in WezTerm).
  *
  * @param operations - Terminal-specific operation functions
+ * @param options - Optional configuration
  * @returns true if any terminal operation succeeded, false otherwise
  */
-export function executeWithTerminalFallback(operations: TerminalOperations): boolean {
-  const strategies = [
-    operations.iTerm2,
-    operations.terminalApp,
-    operations.ghostty,
-    operations.wezterm,
-  ];
+export function executeWithTerminalFallback(
+  operations: TerminalOperations,
+  options?: { preferWezTerm?: boolean }
+): boolean {
+  const strategies = options?.preferWezTerm
+    ? [operations.wezterm, operations.iTerm2, operations.terminalApp, operations.ghostty]
+    : [operations.iTerm2, operations.terminalApp, operations.ghostty, operations.wezterm];
   return strategies.some((op) => op());
 }

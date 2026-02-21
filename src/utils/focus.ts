@@ -158,9 +158,10 @@ end tell
 
 function buildGhosttyScript(): string {
   return `
-tell application "Ghostty"
-  activate
+tell application "System Events"
+  if not (exists process "Ghostty") then return false
 end tell
+tell application "Ghostty" to activate
 return true
 `;
 }
@@ -168,14 +169,15 @@ return true
 function buildGhosttyFocusByTitleScript(titleTag: string): string {
   const safeTag = sanitizeForAppleScript(titleTag);
   return `
--- Activate Ghostty first (required when called from Web UI with Ghostty in background)
-tell application "Ghostty" to activate
-delay 0.1
-
 tell application "System Events"
   if not (exists process "Ghostty") then
     return false
   end if
+end tell
+tell application "Ghostty" to activate
+delay 0.1
+
+tell application "System Events"
   tell process "Ghostty"
     -- Search Window menu for the title tag (uses "name" attribute, not "title")
     try
@@ -236,6 +238,9 @@ function focusGhostty(tty: string): boolean {
 
 function buildWezTermActivateScript(): string {
   return `
+tell application "System Events"
+  if not (exists process "wezterm-gui") then return false
+end tell
 tell application "WezTerm" to activate
 return true
 `;
@@ -244,13 +249,15 @@ return true
 function buildWezTermFocusByTitleScript(titleTag: string): string {
   const safeTag = sanitizeForAppleScript(titleTag);
   return `
-tell application "WezTerm" to activate
-delay 0.1
-
 tell application "System Events"
   if not (exists process "wezterm-gui") then
     return false
   end if
+end tell
+tell application "WezTerm" to activate
+delay 0.1
+
+tell application "System Events"
   tell process "wezterm-gui"
     try
       set windowMenu to menu "Window" of menu bar 1
@@ -282,10 +289,55 @@ function focusWezTermViaCli(weztermPaneId: string): boolean {
     if (!Number.isSafeInteger(paneIdNum)) return false;
     const pane = panes.find(
       (p: Record<string, unknown>) => typeof p?.pane_id === 'number' && p.pane_id === paneIdNum
-    ) as { pane_id: number; tab_id: number } | undefined;
-    if (!pane || typeof pane.tab_id !== 'number') return false;
-    execWezTermCli(['cli', 'activate-tab', '--tab-id', String(pane.tab_id)]);
+    ) as { pane_id: number; tab_id: number; window_title?: string } | undefined;
+    if (!pane) return false;
+    // CLI activate-tab/pane switches focus within WezTerm
+    execWezTermCli([
+      'cli',
+      'activate-tab',
+      '--tab-id',
+      String(pane.tab_id),
+      '--pane-id',
+      weztermPaneId,
+    ]);
     execWezTermCli(['cli', 'activate-pane', '--pane-id', weztermPaneId]);
+    // After CLI activates the pane, we need to raise the correct WezTerm window.
+    // Find all panes in the same window to get the window_id, then match by
+    // checking each System Events window's title against any tab title in that window.
+    const targetWindowId = (pane as Record<string, unknown>).window_id;
+    const windowPanes =
+      typeof targetWindowId === 'number'
+        ? (panes as Array<Record<string, unknown>>).filter(
+            (p) => p.window_id === targetWindowId && typeof p.title === 'string'
+          )
+        : [];
+    // Build list of possible window title matches (any tab title in the target window)
+    const titleHints = windowPanes.map((p) => String(p.title)).filter((t) => t.length > 0);
+
+    // Try each hint to find and raise the right System Events window
+    for (const hint of titleHints) {
+      const safeHint = sanitizeForAppleScript(hint);
+      const raised = executeAppleScript(`
+tell application "System Events"
+  if not (exists process "wezterm-gui") then return false
+  tell process "wezterm-gui"
+    repeat with w in every window
+      if name of w contains "${safeHint}" then
+        perform action "AXRaise" of w
+        return true
+      end if
+    end repeat
+  end tell
+end tell
+return false
+`);
+      if (raised) {
+        executeAppleScript('tell application "WezTerm" to activate');
+        return true;
+      }
+    }
+
+    // Fallback: just activate WezTerm (CLI already switched the right tab/pane)
     executeAppleScript(buildWezTermActivateScript());
     return true;
   } catch {
@@ -328,12 +380,15 @@ export function focusSession(tty: string, weztermPaneId?: string): boolean {
   if (!isMacOS()) return false;
   if (!isValidTtyPath(tty)) return false;
 
-  return executeWithTerminalFallback({
-    iTerm2: () => focusITerm2(tty),
-    terminalApp: () => focusTerminalApp(tty),
-    ghostty: () => focusGhostty(tty),
-    wezterm: () => focusWezTerm(tty, weztermPaneId),
-  });
+  return executeWithTerminalFallback(
+    {
+      iTerm2: () => focusITerm2(tty),
+      terminalApp: () => focusTerminalApp(tty),
+      ghostty: () => focusGhostty(tty),
+      wezterm: () => focusWezTerm(tty, weztermPaneId),
+    },
+    { preferWezTerm: !!weztermPaneId }
+  );
 }
 
 export function getSupportedTerminals(): string[] {

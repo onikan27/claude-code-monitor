@@ -114,14 +114,15 @@ end tell
 function buildGhosttyFocusScript(titleTag: string): string {
   const safeTag = sanitizeForAppleScript(titleTag);
   return `
--- Activate Ghostty first (required when called from Web UI with Ghostty in background)
-tell application "Ghostty" to activate
-delay 0.1
-
 tell application "System Events"
   if not (exists process "Ghostty") then
     return false
   end if
+end tell
+tell application "Ghostty" to activate
+delay 0.1
+
+tell application "System Events"
   tell process "Ghostty"
     try
       set windowMenu to menu "Window" of menu bar 1
@@ -356,13 +357,15 @@ function sendKeystrokeToGhostty(
 function buildWezTermFocusScript(titleTag: string): string {
   const safeTag = sanitizeForAppleScript(titleTag);
   return `
-tell application "WezTerm" to activate
-delay 0.1
-
 tell application "System Events"
   if not (exists process "wezterm-gui") then
     return false
   end if
+end tell
+tell application "WezTerm" to activate
+delay 0.1
+
+tell application "System Events"
   tell process "wezterm-gui"
     try
       set windowMenu to menu "Window" of menu bar 1
@@ -538,12 +541,15 @@ export function sendTextToTerminal(
     return { success: false, error: validation.error };
   }
 
-  const success = executeWithTerminalFallback({
-    iTerm2: () => sendTextToITerm2(tty, text),
-    terminalApp: () => sendTextToTerminalApp(tty, text),
-    ghostty: () => sendTextToGhostty(tty, text),
-    wezterm: () => sendTextToWezTerm(tty, text, weztermPaneId),
-  });
+  const success = executeWithTerminalFallback(
+    {
+      iTerm2: () => sendTextToITerm2(tty, text),
+      terminalApp: () => sendTextToTerminalApp(tty, text),
+      ghostty: () => sendTextToGhostty(tty, text),
+      wezterm: () => sendTextToWezTerm(tty, text, weztermPaneId),
+    },
+    { preferWezTerm: !!weztermPaneId }
+  );
 
   return success
     ? { success: true }
@@ -601,6 +607,7 @@ const ESCAPE_KEY_CODE = 53;
  * @param tty - The TTY path of the target terminal session
  * @param key - Single character key to send (y, n, a, 1-9, escape, etc.)
  * @param useControl - If true, send with Control modifier (for Ctrl+C)
+ * @param weztermPaneId - Optional WezTerm pane ID for direct pane targeting
  * @returns Result object with success status
  */
 export function sendKeystrokeToTerminal(
@@ -648,12 +655,15 @@ export function sendKeystrokeToTerminal(
     useKeyCode = ENTER_KEY_CODE;
   }
 
-  const success = executeWithTerminalFallback({
-    iTerm2: () => sendKeystrokeToITerm2(tty, key, useControl, useKeyCode),
-    terminalApp: () => sendKeystrokeToTerminalApp(tty, key, useControl, useKeyCode),
-    ghostty: () => sendKeystrokeToGhostty(tty, key, useControl, useKeyCode),
-    wezterm: () => sendKeystrokeToWezTerm(tty, key, useControl, useKeyCode, weztermPaneId),
-  });
+  const success = executeWithTerminalFallback(
+    {
+      iTerm2: () => sendKeystrokeToITerm2(tty, key, useControl, useKeyCode),
+      terminalApp: () => sendKeystrokeToTerminalApp(tty, key, useControl, useKeyCode),
+      ghostty: () => sendKeystrokeToGhostty(tty, key, useControl, useKeyCode),
+      wezterm: () => sendKeystrokeToWezTerm(tty, key, useControl, useKeyCode, weztermPaneId),
+    },
+    { preferWezTerm: !!weztermPaneId }
+  );
 
   return success
     ? { success: true }
