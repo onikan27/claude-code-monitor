@@ -61,7 +61,14 @@ function generateAuthToken(): string {
 }
 
 interface WebSocketMessage {
-  type: 'sessions' | 'focus' | 'sendText' | 'sendKeystroke' | 'clearSessions' | 'captureScreen';
+  type:
+    | 'sessions'
+    | 'focus'
+    | 'sendText'
+    | 'sendKeystroke'
+    | 'clearSessions'
+    | 'captureScreen'
+    | 'ping';
   sessionId?: string;
   text?: string;
   key?: string;
@@ -100,18 +107,24 @@ function isDangerousCommand(text: string): boolean {
 }
 
 /**
- * Find a session by session ID.
+ * Find a session by session key (session_id:tty) or plain session_id.
  */
-function findSessionById(sessionId: string): Session | undefined {
+function findSessionByKey(sessionKey: string): Session | undefined {
   const sessions = getSessions();
-  return sessions.find((s) => s.session_id === sessionId);
+  // Try composite key match first (session_id:/dev/ttysNNN)
+  const match = sessions.find(
+    (s) => (s.tty ? `${s.session_id}:${s.tty}` : s.session_id) === sessionKey
+  );
+  if (match) return match;
+  // Fall back to plain session_id for backward compatibility
+  return sessions.find((s) => s.session_id === sessionKey);
 }
 
 /**
  * Handle focus command from WebSocket client.
  */
 function handleFocusCommand(ws: WebSocket, sessionId: string): void {
-  const session = findSessionById(sessionId);
+  const session = findSessionByKey(sessionId);
   if (!session?.tty) {
     ws.send(
       JSON.stringify({
@@ -143,7 +156,7 @@ function handleSendTextCommand(ws: WebSocket, sessionId: string, text: string): 
     return;
   }
 
-  const session = findSessionById(sessionId);
+  const session = findSessionByKey(sessionId);
   if (!session?.tty) {
     ws.send(JSON.stringify({ type: 'sendTextResult', success: false, error: 'Session not found' }));
     return;
@@ -162,7 +175,7 @@ function handleSendKeystrokeCommand(
   key: string,
   useControl = false
 ): void {
-  const session = findSessionById(sessionId);
+  const session = findSessionByKey(sessionId);
   if (!session?.tty) {
     ws.send(
       JSON.stringify({ type: 'sendKeystrokeResult', success: false, error: 'Session not found' })
@@ -196,7 +209,7 @@ function handleClearSessionsCommand(ws: WebSocket): void {
  * Focuses the terminal window first, then captures it.
  */
 async function handleCaptureScreenCommand(ws: WebSocket, sessionId: string): Promise<void> {
-  const session = findSessionById(sessionId);
+  const session = findSessionByKey(sessionId);
   if (!session?.tty) {
     ws.send(
       JSON.stringify({
@@ -251,6 +264,11 @@ function handleWebSocketMessage(ws: WebSocket, data: Buffer): void {
     message = JSON.parse(data.toString()) as WebSocketMessage;
   } catch {
     return; // Ignore invalid messages
+  }
+
+  if (message.type === 'ping') {
+    ws.send(JSON.stringify({ type: 'pong' }));
+    return;
   }
 
   if (message.type === 'focus' && message.sessionId) {
@@ -326,6 +344,7 @@ function setupWebSocketHandlers(wss: WebSocketServer, validToken: string): void 
 export interface ServerOptions {
   port?: number;
   preferTailscale?: boolean;
+  debug?: boolean;
 }
 
 export interface ServerInfo {
@@ -378,6 +397,22 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, validToken: stri
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
   const requestToken = url.searchParams.get('token');
   const filePath = url.pathname === '/' ? '/index.html' : url.pathname;
+
+  // REST API: return sessions as JSON (used by client for instant load before WebSocket connects)
+  if (filePath === '/api/sessions') {
+    if (requestToken !== validToken) {
+      res.writeHead(401, { 'Content-Type': 'text/plain' });
+      res.end('Unauthorized');
+      return;
+    }
+    const sessions = getSessions();
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    });
+    res.end(JSON.stringify({ type: 'sessions', data: sessions }));
+    return;
+  }
 
   // Allow static library files without token (they contain no sensitive data)
   const isPublicLibrary = filePath.startsWith('/lib/') && filePath.endsWith('.js');
@@ -467,12 +502,13 @@ function stopServerComponents({ watcher, wss, server }: ServerComponents): void 
 }
 
 export async function createMobileServer(options: ServerOptions = {}): Promise<ServerInfo> {
-  const { port = DEFAULT_SERVER_PORT, preferTailscale = false } = options;
+  const { port = DEFAULT_SERVER_PORT, preferTailscale = false, debug = false } = options;
   const { ip, localIP, tailscaleIP } = resolveServerIP(preferTailscale);
 
   const actualPort = await findAvailablePort(port, ip);
   const token = generateAuthToken();
-  const url = `http://${ip}:${actualPort}?token=${token}`;
+  const debugParam = debug ? '&debug=1' : '';
+  const url = `http://${ip}:${actualPort}?token=${token}${debugParam}`;
   const qrCode = await generateQRCode(url);
 
   const components = createServerComponents(token);
@@ -495,12 +531,13 @@ export async function createMobileServer(options: ServerOptions = {}): Promise<S
 
 // CLI standalone mode
 export async function startServer(options: ServerOptions = {}): Promise<void> {
-  const { port = DEFAULT_SERVER_PORT, preferTailscale = false } = options;
+  const { port = DEFAULT_SERVER_PORT, preferTailscale = false, debug = false } = options;
   const { ip, tailscaleIP } = resolveServerIP(preferTailscale);
 
   const actualPort = await findAvailablePort(port, ip);
   const token = generateAuthToken();
-  const url = `http://${ip}:${actualPort}?token=${token}`;
+  const debugParam = debug ? '&debug=1' : '';
+  const url = `http://${ip}:${actualPort}?token=${token}${debugParam}`;
 
   const components = createServerComponents(token);
 

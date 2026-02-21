@@ -154,9 +154,10 @@ program
   .description('Start web server for mobile monitoring')
   .option('-p, --port <port>', 'Port number', '3456')
   .option('-t, --tailscale', 'Prefer Tailscale IP for mobile access')
-  .action(async (options: { port: string; tailscale?: boolean }) => {
+  .option('--debug', 'Enable debug panel in web UI')
+  .action(async (options: { port: string; tailscale?: boolean; debug?: boolean }) => {
     const port = parseInt(options.port, 10);
-    await startServer({ port, preferTailscale: options.tailscale });
+    await startServer({ port, preferTailscale: options.tailscale, debug: options.debug });
   });
 
 /**

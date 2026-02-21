@@ -1151,6 +1151,12 @@
         <span class="loading-text">Connecting...</span>
       </div>
     </div>
+    <div id="dbgWrap" style="position:fixed;bottom:0;left:0;right:0;z-index:9999;display:none;">
+      <div id="dbgTab" onclick="document.getElementById('dbg').classList.toggle('dbg-hidden');this.textContent=document.getElementById('dbg').classList.contains('dbg-hidden')?'▲ Debug':'▼ Debug'" style="background:#222;color:#0f0;font:10px monospace;padding:2px 8px;cursor:pointer;display:inline-block;border-radius:4px 4px 0 0;opacity:0.8;">▼ Debug</div>
+      <div id="dbg" style="background:#111;color:#0f0;font:10px monospace;padding:4px;max-height:15vh;overflow-y:scroll;-webkit-overflow-scrolling:touch;opacity:0.8;"></div>
+    </div>
+    <style>#dbg.dbg-hidden{display:none;}</style>
+    <script>if(new URLSearchParams(location.search).has('debug'))document.getElementById('dbgWrap').style.display='';</script>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -1257,16 +1263,35 @@
     const $fullscreenClose = document.getElementById('fullscreenClose');
     const $fullscreenHint = document.getElementById('fullscreenHint');
 
+    const $dbg = document.getElementById('dbg');
+    const debugEnabled = new URLSearchParams(location.search).has('debug');
+    function dbg(msg) {
+      if (!debugEnabled) return;
+      const t = new Date().toLocaleTimeString();
+      $dbg.innerHTML += t + ' ' + msg + '<br>';
+      $dbg.scrollTop = $dbg.scrollHeight;
+    }
+    dbg('init');
+
     const TOAST_DURATION_MS = 2500;
-    const RECONNECT_DELAY_MS = 2000;
+    const RECONNECT_BASE_MS = 1000;
+    const RECONNECT_MAX_MS = 30000;
     const SEND_TIMEOUT_MS = 5000;
     const SWIPE_THRESHOLD_PX = 100;
+    const HEARTBEAT_INTERVAL_MS = 25000;
+    const HEARTBEAT_TIMEOUT_MS = 10000;
 
     let ws = null;
     let targetSession = null;
     let pendingSend = null;
     let sessionsData = [];
     let captureDebounceTimer = null;
+    let reconnectAttempt = 0;
+    let reconnectTimer = null;
+    let heartbeatTimer = null;
+    let heartbeatTimeoutTimer = null;
+    let isConnecting = false;
+    let lastConnectTime = 0;
 
     // Event delegation for card clicks (safer than inline onclick)
     $sessions.addEventListener('click', (e) => {
@@ -1363,6 +1388,10 @@
       return /^[a-zA-Z0-9_-]+$/.test(id);
     }
 
+    function getSessionKey(session) {
+      return session.tty ? session.session_id + ':' + session.tty : session.session_id;
+    }
+
     function renderMarkdown(markdownText) {
       if (!markdownText) return '<span class="modal-message-empty">No messages yet</span>';
       if (typeof marked !== 'undefined') {
@@ -1379,7 +1408,7 @@
     }
 
     function getSessionById(id) {
-      return sessionsData.find(s => s.session_id === id);
+      return sessionsData.find(s => getSessionKey(s) === id);
     }
 
     function openModal(id) {
@@ -1797,6 +1826,7 @@
         if (!isValidSessionId(session.session_id)) return '';
 
         // Escape all user-provided content to prevent XSS
+        const sessionKey = getSessionKey(session);
         const dirName = escapeHtml(getDirName(session.cwd));
         const shortPath = escapeHtml(formatPath(session.cwd));
         const statusLabel = escapeHtml(STATUS[session.status]);
@@ -1804,7 +1834,7 @@
         const safeStatus = escapeHtml(session.status);
 
         return `
-          <div class="card ${safeStatus}" data-session-id="${escapeHtml(session.session_id)}">
+          <div class="card ${safeStatus}" data-session-id="${escapeHtml(sessionKey)}">
             <div class="card-status">
               <span class="card-status-dot"></span>
               <span>${statusLabel}</span>
@@ -1824,7 +1854,76 @@
       }).join('');
     }
 
+    function getReconnectDelay() {
+      const delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, reconnectAttempt), RECONNECT_MAX_MS);
+      const jitter = delay * 0.3 * Math.random();
+      reconnectAttempt++;
+      return delay + jitter;
+    }
+
+    function startHeartbeat() {
+      stopHeartbeat();
+      heartbeatTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+          heartbeatTimeoutTimer = setTimeout(() => {
+            // No pong received — connection is dead
+            forceReconnect();
+          }, HEARTBEAT_TIMEOUT_MS);
+        }
+      }, HEARTBEAT_INTERVAL_MS);
+    }
+
+    function stopHeartbeat() {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+      clearTimeout(heartbeatTimeoutTimer);
+      heartbeatTimeoutTimer = null;
+    }
+
+    function resetHeartbeatTimeout() {
+      clearTimeout(heartbeatTimeoutTimer);
+      heartbeatTimeoutTimer = null;
+    }
+
+    function teardownSocket() {
+      stopHeartbeat();
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      if (ws) {
+        // Remove handlers to prevent double-reconnect
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+        try { ws.close(); } catch {}
+        ws = null;
+      }
+      isConnecting = false;
+    }
+
+    function forceReconnect() {
+      const age = Date.now() - lastConnectTime;
+      if (age < 3000) {
+        return;
+      }
+      dbg('reconnect');
+      teardownSocket();
+      setConn(false);
+      connect();
+    }
+
+    function scheduleReconnect() {
+      if (reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, getReconnectDelay());
+    }
+
     function connect() {
+      // Prevent double-connections
+      if (isConnecting) return;
+
       const params = new URLSearchParams(window.location.search);
       const token = params.get('token');
 
@@ -1839,25 +1938,49 @@
         return;
       }
 
+      isConnecting = true;
+      lastConnectTime = Date.now();
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${proto}//${location.host}?token=${token}`);
+      const wsUrl = `${proto}//${location.host}?token=${token}`;
+
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (ex) {
+        dbg('ws constructor error: ' + ex.message);
+        isConnecting = false;
+        return;
+      }
+      dbg('ws connecting');
 
       ws.onopen = () => {
+        dbg('ws open');
+        isConnecting = false;
+        reconnectAttempt = 0;
         setConn(true);
-        pendingSend = null; // Reset pending state on reconnect
+        pendingSend = null;
+        startHeartbeat();
       };
-      ws.onclose = () => {
-        setConn(false);
-        pendingSend = null; // Reset pending state on disconnect
-        setTimeout(connect, RECONNECT_DELAY_MS);
-      };
-      ws.onerror = () => {
+      ws.onclose = (e) => {
+        dbg('ws close code=' + e.code);
+        isConnecting = false;
         setConn(false);
         pendingSend = null;
+        stopHeartbeat();
+        scheduleReconnect();
+      };
+      ws.onerror = (e) => {
+        dbg('ws error');
+        isConnecting = false;
+        setConn(false);
+        pendingSend = null;
+        stopHeartbeat();
       };
       ws.onmessage = (event) => {
+        // Any message from server proves the connection is alive
+        resetHeartbeatTimeout();
         try {
           const msg = JSON.parse(event.data);
+          if (msg.type === 'pong') return; // Heartbeat response, nothing to render
           if (msg.type === 'sessions') {
             render(msg.data);
           } else if (msg.type === 'focusResult') {
@@ -1875,7 +1998,6 @@
           } else if (msg.type === 'clearSessionsResult') {
             if (!msg.success) toast(msg.error || 'Failed', 'err');
           } else if (msg.type === 'sendKeystrokeResult') {
-            // Handle keystroke result (from dpad or text input in waiting_input state)
             if (pendingSend) {
               pendingSend = null;
               $sendBtn.disabled = !$msgInput.value.trim();
@@ -1898,7 +2020,46 @@
       };
     }
 
+    // Fetch sessions immediately over HTTP — renders the page without
+    // waiting for the WebSocket (iOS Safari delays WS connections ~10-15s).
+    const params = new URLSearchParams(window.location.search);
+    const initToken = params.get('token');
+    if (initToken) {
+      fetch('/api/sessions?token=' + encodeURIComponent(initToken))
+        .then(r => r.json())
+        .then(msg => {
+          if (msg.data) {
+            render(msg.data);
+            setConn(true);
+          }
+        })
+        .catch(() => {});
+    }
+
     connect();
+
+    // iOS Safari: force reconnect when page returns to foreground.
+    // readyState LIES after iOS suspension — it reports OPEN on dead connections.
+    // So we always tear down and reconnect, regardless of readyState.
+    document.addEventListener('visibilitychange', () => {
+      dbg('visibility: ' + document.visibilityState);
+      if (document.visibilityState === 'visible') {
+        forceReconnect();
+      }
+    });
+
+    // BFCache: reconnect when restored from back-forward cache
+    window.addEventListener('pageshow', (event) => {
+      dbg('pageshow persisted=' + event.persisted);
+      if (event.persisted) {
+        forceReconnect();
+      }
+    });
+
+    // Stop heartbeat when page goes to background (socket may survive or die on its own)
+    window.addEventListener('pagehide', () => {
+      stopHeartbeat();
+    });
 
     // Prevent zoom
     document.body.addEventListener('touchmove', (e) => {

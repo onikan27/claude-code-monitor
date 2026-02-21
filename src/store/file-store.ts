@@ -125,19 +125,14 @@ export function determineStatus(event: HookEvent, currentStatus?: SessionStatus)
     return 'stopped';
   }
 
-  // UserPromptSubmit starts a new operation, so resume even if stopped
-  if (event.hook_event_name === 'UserPromptSubmit') {
+  // Active events resume even if stopped — if Claude Code is using tools, it's running
+  if (event.hook_event_name === 'UserPromptSubmit' || event.hook_event_name === 'PreToolUse') {
     return 'running';
   }
 
-  // Keep stopped state (don't resume except for UserPromptSubmit)
+  // Keep stopped state for non-active events (PostToolUse, Notification without permission)
   if (currentStatus === 'stopped') {
     return 'stopped';
-  }
-
-  // Active operation event
-  if (event.hook_event_name === 'PreToolUse') {
-    return 'running';
   }
 
   // Waiting for permission prompt
