@@ -1280,6 +1280,9 @@
     const SWIPE_THRESHOLD_PX = 100;
     const HEARTBEAT_INTERVAL_MS = 25000;
     const HEARTBEAT_TIMEOUT_MS = 10000;
+    const CONNECT_TIMEOUT_MS = 5000;
+    const POLL_INTERVAL_MS = 3000;
+    const WS_FAIL_POLL_THRESHOLD = 2;
 
     let ws = null;
     let targetSession = null;
@@ -1292,6 +1295,10 @@
     let heartbeatTimeoutTimer = null;
     let isConnecting = false;
     let lastConnectTime = 0;
+    let connectTimeoutTimer = null;
+    let wsConsecutiveFailures = 0;
+    let pollTimer = null;
+    let currentSocketOpened = false;
 
     // Event delegation for card clicks (safer than inline onclick)
     $sessions.addEventListener('click', (e) => {
@@ -1854,6 +1861,39 @@
       }).join('');
     }
 
+    function getAuthToken() {
+      return new URLSearchParams(window.location.search).get('token');
+    }
+
+    function fetchSessions() {
+      const token = getAuthToken();
+      if (!token) return;
+      fetch('/api/sessions?token=' + encodeURIComponent(token))
+        .then(r => r.json())
+        .then(msg => {
+          if (msg.data) {
+            render(msg.data);
+            setConn(true);
+            dbg('http poll ok');
+          }
+        })
+        .catch(() => { dbg('http poll fail'); });
+    }
+
+    function startPolling() {
+      if (pollTimer) return;
+      dbg('polling start');
+      fetchSessions();
+      pollTimer = setInterval(fetchSessions, POLL_INTERVAL_MS);
+    }
+
+    function stopPolling() {
+      if (!pollTimer) return;
+      dbg('polling stop');
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
     function getReconnectDelay() {
       const delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, reconnectAttempt), RECONNECT_MAX_MS);
       const jitter = delay * 0.3 * Math.random();
@@ -1890,6 +1930,8 @@
       stopHeartbeat();
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
+      clearTimeout(connectTimeoutTimer);
+      connectTimeoutTimer = null;
       if (ws) {
         // Remove handlers to prevent double-reconnect
         ws.onclose = null;
@@ -1924,8 +1966,7 @@
       // Prevent double-connections
       if (isConnecting) return;
 
-      const params = new URLSearchParams(window.location.search);
-      const token = params.get('token');
+      const token = getAuthToken();
 
       if (!token) {
         $sessions.innerHTML = `
@@ -1939,6 +1980,7 @@
       }
 
       isConnecting = true;
+      currentSocketOpened = false;
       lastConnectTime = Date.now();
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${proto}//${location.host}?token=${token}`;
@@ -1952,10 +1994,29 @@
       }
       dbg('ws connecting');
 
+      // iOS Safari can hang WebSocket connections indefinitely after
+      // returning from background — onopen/onclose/onerror never fire.
+      // This timeout detects the hung state and forces a retry.
+      connectTimeoutTimer = setTimeout(() => {
+        dbg('ws connect timeout');
+        teardownSocket();
+        setConn(false);
+        wsConsecutiveFailures++;
+        if (wsConsecutiveFailures >= WS_FAIL_POLL_THRESHOLD) {
+          startPolling();
+        }
+        scheduleReconnect();
+      }, CONNECT_TIMEOUT_MS);
+
       ws.onopen = () => {
+        clearTimeout(connectTimeoutTimer);
+        connectTimeoutTimer = null;
+        currentSocketOpened = true;
         dbg('ws open');
         isConnecting = false;
         reconnectAttempt = 0;
+        wsConsecutiveFailures = 0;
+        stopPolling();
         setConn(true);
         pendingSend = null;
         startHeartbeat();
@@ -1966,6 +2027,13 @@
         setConn(false);
         pendingSend = null;
         stopHeartbeat();
+        // Count as failure if the socket never opened (e.g., iOS 1006 after resume)
+        if (!currentSocketOpened) {
+          wsConsecutiveFailures++;
+          if (wsConsecutiveFailures >= WS_FAIL_POLL_THRESHOLD) {
+            startPolling();
+          }
+        }
         scheduleReconnect();
       };
       ws.onerror = (e) => {
@@ -2022,19 +2090,7 @@
 
     // Fetch sessions immediately over HTTP — renders the page without
     // waiting for the WebSocket (iOS Safari delays WS connections ~10-15s).
-    const params = new URLSearchParams(window.location.search);
-    const initToken = params.get('token');
-    if (initToken) {
-      fetch('/api/sessions?token=' + encodeURIComponent(initToken))
-        .then(r => r.json())
-        .then(msg => {
-          if (msg.data) {
-            render(msg.data);
-            setConn(true);
-          }
-        })
-        .catch(() => {});
-    }
+    fetchSessions();
 
     connect();
 
@@ -2044,6 +2100,13 @@
     document.addEventListener('visibilitychange', () => {
       dbg('visibility: ' + document.visibilityState);
       if (document.visibilityState === 'visible') {
+        // Blur input so iOS doesn't auto-open the keyboard on resume
+        if (document.activeElement && document.activeElement.tagName === 'TEXTAREA') {
+          document.activeElement.blur();
+        }
+        // Fetch fresh data immediately over HTTP — this works even when
+        // iOS Safari's WebSocket stack is still recovering from suspension.
+        fetchSessions();
         forceReconnect();
       }
     });
