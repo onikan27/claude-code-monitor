@@ -1,12 +1,9 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { HOOK_EVENTS, PACKAGE_NAME } from '../constants.js';
+import { getClaudeConfigDir } from '../utils/claude-config.js';
 import { askConfirmation } from '../utils/prompt.js';
-
-const CLAUDE_DIR = join(homedir(), '.claude');
-const SETTINGS_FILE = join(CLAUDE_DIR, 'settings.json');
 
 /** Environment variable key to disable Claude Code terminal title override */
 const DISABLE_TITLE_ENV_KEY = 'CLAUDE_CODE_DISABLE_TERMINAL_TITLE';
@@ -127,11 +124,12 @@ function createHookEntry(eventName: string, baseCommand: string): HookEntry {
  * Load existing settings.json or return empty settings
  */
 function loadSettings(): Settings {
-  if (!existsSync(SETTINGS_FILE)) {
+  const settingsFile = join(getClaudeConfigDir(), 'settings.json');
+  if (!existsSync(settingsFile)) {
     return {};
   }
   try {
-    const content = readFileSync(SETTINGS_FILE, 'utf-8');
+    const content = readFileSync(settingsFile, 'utf-8');
     return JSON.parse(content) as Settings;
   } catch {
     console.error('Warning: Failed to parse existing settings.json, creating new one');
@@ -166,7 +164,8 @@ function showSetupPreview(
   hooksToSkip: string[],
   settingsExist: boolean
 ): void {
-  console.log(`Target file: ${SETTINGS_FILE}`);
+  const settingsFile = join(getClaudeConfigDir(), 'settings.json');
+  console.log(`Target file: ${settingsFile}`);
   console.log(settingsExist ? '(file exists, will be modified)' : '(file will be created)');
   console.log('');
   console.log('The following hooks will be added:');
@@ -187,6 +186,7 @@ function showSetupPreview(
  * Apply hooks to settings and save to file
  */
 function applyHooks(settings: Settings, hooksToAdd: string[], baseCommand: string): void {
+  const settingsFile = join(getClaudeConfigDir(), 'settings.json');
   if (!settings.hooks) {
     settings.hooks = {};
   }
@@ -200,7 +200,7 @@ function applyHooks(settings: Settings, hooksToAdd: string[], baseCommand: strin
     }
   }
 
-  writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), {
+  writeFileSync(settingsFile, JSON.stringify(settings, null, 2), {
     encoding: 'utf-8',
     mode: 0o600,
   });
@@ -210,12 +210,13 @@ function applyHooks(settings: Settings, hooksToAdd: string[], baseCommand: strin
  * Check if hooks are already configured
  */
 export function isHooksConfigured(): boolean {
-  if (!existsSync(SETTINGS_FILE)) {
+  const settingsFile = join(getClaudeConfigDir(), 'settings.json');
+  if (!existsSync(settingsFile)) {
     return false;
   }
 
   try {
-    const content = readFileSync(SETTINGS_FILE, 'utf-8');
+    const content = readFileSync(settingsFile, 'utf-8');
     const settings = JSON.parse(content) as Settings;
 
     if (!settings.hooks) {
@@ -244,12 +245,15 @@ export async function setupHooks(): Promise<void> {
   console.log(`Using command: ${baseCommand}`);
   console.log('');
 
-  // Ensure .claude directory exists
-  if (!existsSync(CLAUDE_DIR)) {
-    mkdirSync(CLAUDE_DIR, { recursive: true });
+  const claudeDir = getClaudeConfigDir();
+  const settingsFile = join(claudeDir, 'settings.json');
+
+  // Ensure claude config directory exists
+  if (!existsSync(claudeDir)) {
+    mkdirSync(claudeDir, { recursive: true });
   }
 
-  const settingsExist = existsSync(SETTINGS_FILE);
+  const settingsExist = existsSync(settingsFile);
   const settings = loadSettings();
   const { toAdd: hooksToAdd, toSkip: hooksToSkip } = categorizeHooks(settings);
 
@@ -277,7 +281,7 @@ export async function setupHooks(): Promise<void> {
       applyHooks(settings, hooksToAdd, baseCommand);
       hooksApplied = true;
       console.log('');
-      console.log(`Added ${hooksToAdd.length} hook(s) to ${SETTINGS_FILE}`);
+      console.log(`Added ${hooksToAdd.length} hook(s) to ${settingsFile}`);
     } else {
       console.log('');
       console.log('Hook setup skipped.');
@@ -293,7 +297,7 @@ export async function setupHooks(): Promise<void> {
     const envConfirmed = await askConfirmation('Add CLAUDE_CODE_DISABLE_TERMINAL_TITLE setting?');
     // Save decision so we don't ask again
     applyGhosttyTitleSetting(settings, envConfirmed);
-    writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), {
+    writeFileSync(settingsFile, JSON.stringify(settings, null, 2), {
       encoding: 'utf-8',
       mode: 0o600,
     });
@@ -335,7 +339,8 @@ export async function promptGhosttySettingIfNeeded(): Promise<void> {
   const envConfirmed = await askConfirmation('Add CLAUDE_CODE_DISABLE_TERMINAL_TITLE setting?');
 
   applyGhosttyTitleSetting(settings, envConfirmed);
-  writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), {
+  const settingsFile = join(getClaudeConfigDir(), 'settings.json');
+  writeFileSync(settingsFile, JSON.stringify(settings, null, 2), {
     encoding: 'utf-8',
     mode: 0o600,
   });

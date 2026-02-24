@@ -116,6 +116,20 @@ With `-t` option, the QR code URL uses your Tailscale IP (100.x.x.x), allowing a
 | `-t, --tailscale` | Prefer Tailscale IP for mobile access |
 | `-p, --port <port>` | Specify port (serve command only) |
 
+### Custom Config Directory
+
+If you use `CLAUDE_CONFIG_DIR` to run Claude Code with a custom config directory, `ccm` respects it automatically:
+
+```bash
+# Setup hooks in custom config directory
+CLAUDE_CONFIG_DIR=~/.claude-work ccm setup
+
+# Monitor with custom config
+CLAUDE_CONFIG_DIR=~/.claude-work ccm
+```
+
+> By default, `ccm` uses `~/.claude/`. Set `CLAUDE_CONFIG_DIR` to match the value you pass to Claude Code.
+
 ### Keybindings
 
 | Key | Action |
@@ -186,7 +200,7 @@ Monitor and control Claude Code sessions from your smartphone.
 For reliable focus functionality with multiple tabs, `ccm` or `ccm setup` will prompt you to add the following setting:
 
 ```json
-// ~/.claude/settings.json
+// ~/.claude/settings.json (or $CLAUDE_CONFIG_DIR/settings.json)
 {
   "env": {
     "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"
@@ -205,7 +219,7 @@ If you skipped this during setup and want to enable it later, add the setting ma
 ### Sessions not showing
 
 1. Run `ccm setup` to verify hook configuration
-2. Check `~/.claude/settings.json` for hook settings
+2. Check `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`) for hook settings
 3. Restart Claude Code
 
 ### Focus not working
@@ -231,7 +245,7 @@ ccm clear
 > and gain control of your terminal sessions, including the ability to execute arbitrary commands.
 
 - **No data sent to external servers** - All data stays on your machine
-- Hook registration modifies `~/.claude/settings.json`
+- Hook registration modifies `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`)
 - Focus feature uses AppleScript for terminal control
 - Mobile Web uses token authentication on local network only
 - Server-side validation blocks dangerous shell commands

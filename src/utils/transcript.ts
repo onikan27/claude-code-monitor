@@ -1,15 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getClaudeConfigDir } from './claude-config.js';
 
 /**
  * Build transcript file path from cwd and session_id.
- * Claude Code stores transcripts at ~/.claude/projects/{encoded-cwd}/{session_id}.jsonl
+ * Claude Code stores transcripts at {claude-config-dir}/projects/{encoded-cwd}/{session_id}.jsonl
  */
 export function buildTranscriptPath(cwd: string, sessionId: string): string {
   // Encode cwd: replace / and . with - (including leading /)
   const encodedCwd = cwd.replace(/[/.]/g, '-');
-  return join(homedir(), '.claude', 'projects', encodedCwd, `${sessionId}.jsonl`);
+  return join(getClaudeConfigDir(), 'projects', encodedCwd, `${sessionId}.jsonl`);
 }
 
 interface ContentBlock {
