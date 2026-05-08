@@ -11,6 +11,7 @@ export interface HookEvent {
   session_id: string;
   cwd: string;
   tty?: string;
+  pid?: number;
   hook_event_name: HookEventName;
   notification_type?: string;
   transcript_path?: string;
@@ -24,6 +25,7 @@ export interface Session {
   session_id: string;
   cwd: string;
   tty?: string;
+  pid?: number;
   status: SessionStatus;
   created_at: string;
   updated_at: string;

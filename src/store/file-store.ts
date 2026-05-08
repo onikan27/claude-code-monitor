@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { WRITE_DEBOUNCE_MS } from '../constants.js';
@@ -12,6 +12,10 @@ export { isTtyAlive } from '../utils/tty-cache.js';
 const STORE_DIR = join(homedir(), '.claude-monitor');
 const STORE_FILE = join(STORE_DIR, 'sessions.json');
 const SETTINGS_FILE = join(STORE_DIR, 'settings.json');
+const LOCK_DIR = join(STORE_DIR, '.lock');
+const LOCK_MAX_RETRIES = 20;
+const LOCK_RETRY_DELAY_MS = 10;
+const LOCK_STALE_MS = 5_000;
 
 export interface Settings {
   qrCodeVisible: boolean;
@@ -24,6 +28,67 @@ const DEFAULT_SETTINGS: Settings = {
 // In-memory cache for batched writes
 let cachedStore: StoreData | null = null;
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquireLock(): boolean {
+  for (let i = 0; i < LOCK_MAX_RETRIES; i++) {
+    try {
+      mkdirSync(LOCK_DIR);
+      return true;
+    } catch {
+      // Check for stale lock (e.g., process crashed while holding it)
+      try {
+        const stat = readFileSync(join(LOCK_DIR, '.pid'), 'utf-8');
+        const lockAge = Date.now() - parseInt(stat, 10);
+        if (lockAge > LOCK_STALE_MS) {
+          releaseLock();
+          continue;
+        }
+      } catch {
+        // No .pid file or unreadable — check dir age via retry exhaustion
+      }
+      const end = Date.now() + LOCK_RETRY_DELAY_MS;
+      while (Date.now() < end) {
+        // spin wait
+      }
+    }
+  }
+  return false;
+}
+
+function releaseLock(): void {
+  try {
+    rmdirSync(LOCK_DIR, { recursive: true });
+  } catch {
+    // Already released
+  }
+}
+
+function withLock<T>(fn: () => T): T {
+  const locked = acquireLock();
+  if (locked) {
+    try {
+      writeFileSync(join(LOCK_DIR, '.pid'), String(Date.now()), 'utf-8');
+    } catch {
+      // Best effort
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (locked) {
+      releaseLock();
+    }
+  }
+}
 
 function ensureStoreDir(): void {
   if (!existsSync(STORE_DIR)) {
@@ -130,14 +195,14 @@ export function determineStatus(event: HookEvent, currentStatus?: SessionStatus)
     return 'running';
   }
 
-  // Keep stopped state (don't resume except for UserPromptSubmit)
-  if (currentStatus === 'stopped') {
-    return 'stopped';
-  }
-
-  // Active operation event
+  // PreToolUse means active work (including subagents) — resume even if stopped
   if (event.hook_event_name === 'PreToolUse') {
     return 'running';
+  }
+
+  // Keep stopped state for other events (PostToolUse, non-permission Notification)
+  if (currentStatus === 'stopped') {
+    return 'stopped';
   }
 
   // Waiting for permission prompt
@@ -152,38 +217,52 @@ export function determineStatus(event: HookEvent, currentStatus?: SessionStatus)
 }
 
 export function updateSession(event: HookEvent): Session {
-  const store = readStore();
-  const key = getSessionKey(event.session_id, event.tty);
-  const now = new Date().toISOString();
-
-  // Remove old session if a different session exists on the same TTY
-  // (e.g., when a new session starts after /clear)
-  if (event.tty) {
-    removeOldSessionsOnSameTty(store.sessions, event.session_id, event.tty);
-  }
-
-  const existing = store.sessions[key];
-
-  // Get latest assistant message from transcript
+  // Pre-compute transcript outside the lock to minimize lock hold time
   const assistantMessage = event.transcript_path
     ? getLastAssistantMessage(event.transcript_path)
     : undefined;
-  const lastMessage = assistantMessage ?? existing?.lastMessage;
 
-  const session: Session = {
-    session_id: event.session_id,
-    cwd: event.cwd,
-    tty: event.tty ?? existing?.tty,
-    status: determineStatus(event, existing?.status),
-    created_at: existing?.created_at ?? now,
-    updated_at: now,
-    lastMessage,
-  };
+  return withLock(() => {
+    // Read fresh from disk inside the lock to avoid stale data
+    const prevCache = cachedStore;
+    cachedStore = null;
+    const store = readStore();
 
-  store.sessions[key] = session;
-  writeStore(store);
+    const key = getSessionKey(event.session_id, event.tty);
+    const now = new Date().toISOString();
 
-  return session;
+    if (event.tty) {
+      removeOldSessionsOnSameTty(store.sessions, event.session_id, event.tty);
+    }
+
+    const existing = store.sessions[key];
+    const lastMessage = assistantMessage ?? existing?.lastMessage;
+
+    const session: Session = {
+      session_id: event.session_id,
+      cwd: event.cwd,
+      tty: event.tty ?? existing?.tty,
+      pid: event.pid ?? existing?.pid,
+      status: determineStatus(event, existing?.status),
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+      lastMessage,
+    };
+
+    store.sessions[key] = session;
+
+    // Write synchronously inside the lock — bypass debounce
+    try {
+      ensureStoreDir();
+      store.updated_at = now;
+      writeFileSync(STORE_FILE, JSON.stringify(store), { encoding: 'utf-8', mode: 0o600 });
+    } catch {
+      // Restore previous cache on failure
+      cachedStore = prevCache;
+    }
+
+    return session;
+  });
 }
 
 export function getSessions(): Session[] {
@@ -193,8 +272,15 @@ export function getSessions(): Session[] {
   for (const [key, session] of Object.entries(store.sessions)) {
     const isTtyStillAlive = isTtyAlive(session.tty);
 
-    // Only remove sessions when TTY no longer exists
+    // Remove sessions when TTY no longer exists
     if (!isTtyStillAlive) {
+      delete store.sessions[key];
+      hasChanges = true;
+      continue;
+    }
+
+    // Remove sessions whose Claude Code process has exited
+    if (session.pid && !isProcessAlive(session.pid)) {
       delete store.sessions[key];
       hasChanges = true;
     }

@@ -117,7 +117,7 @@ describe('file-store', () => {
       expect(determineStatus(event, 'stopped')).toBe('stopped');
     });
 
-    it('should return running on PreToolUse event', async () => {
+    it('should return running on PreToolUse event even if stopped (subagent)', async () => {
       const { determineStatus } = await import('../src/store/file-store.js');
       const event: HookEvent = {
         session_id: 'test',
@@ -126,6 +126,7 @@ describe('file-store', () => {
       };
       expect(determineStatus(event)).toBe('running');
       expect(determineStatus(event, 'waiting_input')).toBe('running');
+      expect(determineStatus(event, 'stopped')).toBe('running');
     });
 
     it('should return waiting_input on Notification with permission_prompt', async () => {
@@ -320,7 +321,7 @@ describe('file-store', () => {
       expect(sessions[1].session_id).toBe('new');
     });
 
-    it('should not remove sessions based on time (no timeout)', async () => {
+    it('should not remove running sessions based on time', async () => {
       const { writeStore, getSessions } = await import('../src/store/file-store.js');
       const now = Date.now();
       const thirtyOneMinutesAgo = now - 31 * 60 * 1000;
@@ -347,8 +348,48 @@ describe('file-store', () => {
 
       const sessions = getSessions();
 
-      // Sessions are not removed based on time, only TTY existence
+      // Running sessions are not removed based on time
       expect(sessions).toHaveLength(2);
+    });
+
+    it('should remove sessions whose process has exited', async () => {
+      const { writeStore, getSessions } = await import('../src/store/file-store.js');
+      const now = Date.now();
+
+      writeStore({
+        sessions: {
+          'dead:/dev/ttys001': {
+            session_id: 'dead',
+            cwd: '/tmp',
+            tty: '/dev/ttys001',
+            pid: 999999,
+            status: 'stopped',
+            updated_at: new Date(now).toISOString(),
+          },
+          'alive:/dev/ttys002': {
+            session_id: 'alive',
+            cwd: '/tmp',
+            tty: '/dev/ttys002',
+            pid: process.pid,
+            status: 'stopped',
+            updated_at: new Date(now).toISOString(),
+          },
+          'no-pid:/dev/ttys003': {
+            session_id: 'no-pid',
+            cwd: '/tmp',
+            tty: '/dev/ttys003',
+            status: 'running',
+            updated_at: new Date(now).toISOString(),
+          },
+        },
+        updated_at: new Date().toISOString(),
+      });
+
+      const sessions = getSessions();
+
+      // Dead PID removed, alive PID and no-pid kept
+      expect(sessions).toHaveLength(2);
+      expect(sessions.map((s) => s.session_id).sort()).toEqual(['alive', 'no-pid']);
     });
   });
 

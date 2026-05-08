@@ -17,8 +17,8 @@ export const SESSION_UPDATE_DEBOUNCE_MS = 150;
 /** Debounce delay for JSON file writes in milliseconds */
 export const WRITE_DEBOUNCE_MS = 100;
 
-/** Periodic refresh interval for timeout detection in milliseconds (60 seconds) */
-export const SESSION_REFRESH_INTERVAL_MS = 60_000;
+/** Periodic refresh interval for PID liveness detection in milliseconds (5 seconds) */
+export const SESSION_REFRESH_INTERVAL_MS = 5_000;
 
 /**
  * QRコード表示に必要な最小ターミナル高さ
