@@ -22,7 +22,7 @@ const EXIT_ALT_SCREEN = '\x1b[?1049l';
  */
 const MAX_ANCESTOR_DEPTH = 5;
 
-function getTtyFromAncestors(): string | undefined {
+function getAncestorInfo(): { tty?: string; pid?: number } {
   try {
     let currentPid = process.ppid;
     for (let i = 0; i < MAX_ANCESTOR_DEPTH; i++) {
@@ -32,7 +32,7 @@ function getTtyFromAncestors(): string | undefined {
       }).trim();
       const isValidTty = ttyName && ttyName !== '??' && ttyName !== '';
       if (isValidTty) {
-        return `/dev/${ttyName}`;
+        return { tty: `/dev/${ttyName}`, pid: currentPid };
       }
       const ppid = execFileSync('ps', ['-o', 'ppid=', '-p', String(currentPid)], {
         encoding: 'utf-8',
@@ -42,9 +42,9 @@ function getTtyFromAncestors(): string | undefined {
       currentPid = parseInt(ppid, 10);
     }
   } catch {
-    // TTY取得失敗は正常（バックグラウンド実行時など）
+    // Normal in background execution
   }
-  return undefined;
+  return {};
 }
 
 interface DashboardOptions {
@@ -108,8 +108,8 @@ program
   .description('Handle a hook event from Claude Code (internal use)')
   .action(async (event: string) => {
     try {
-      const tty = getTtyFromAncestors();
-      await handleHookEvent(event, tty);
+      const { tty, pid } = getAncestorInfo();
+      await handleHookEvent(event, tty, pid);
     } catch (e) {
       console.error('Hook error:', e);
       process.exit(1);

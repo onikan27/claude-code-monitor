@@ -242,7 +242,7 @@ export function updateSession(event: HookEvent): Session {
       session_id: event.session_id,
       cwd: event.cwd,
       tty: event.tty ?? existing?.tty,
-      pid: process.ppid ?? existing?.pid,
+      pid: event.pid ?? existing?.pid,
       status: determineStatus(event, existing?.status),
       created_at: existing?.created_at ?? now,
       updated_at: now,
