@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { STOPPED_SESSION_TTL_MS, WRITE_DEBOUNCE_MS } from '../constants.js';
+import { WRITE_DEBOUNCE_MS } from '../constants.js';
 import type { HookEvent, Session, SessionStatus, StoreData } from '../types/index.js';
 import { getLastAssistantMessage } from '../utils/transcript.js';
 import { isTtyAlive } from '../utils/tty-cache.js';
@@ -28,6 +28,15 @@ const DEFAULT_SETTINGS: Settings = {
 // In-memory cache for batched writes
 let cachedStore: StoreData | null = null;
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function acquireLock(): boolean {
   for (let i = 0; i < LOCK_MAX_RETRIES; i++) {
@@ -233,6 +242,7 @@ export function updateSession(event: HookEvent): Session {
       session_id: event.session_id,
       cwd: event.cwd,
       tty: event.tty ?? existing?.tty,
+      pid: process.ppid ?? existing?.pid,
       status: determineStatus(event, existing?.status),
       created_at: existing?.created_at ?? now,
       updated_at: now,
@@ -259,7 +269,6 @@ export function getSessions(): Session[] {
   const store = readStore();
 
   let hasChanges = false;
-  const now = Date.now();
   for (const [key, session] of Object.entries(store.sessions)) {
     const isTtyStillAlive = isTtyAlive(session.tty);
 
@@ -270,13 +279,10 @@ export function getSessions(): Session[] {
       continue;
     }
 
-    // Remove stopped sessions after TTL expires
-    if (session.status === 'stopped') {
-      const updatedAt = new Date(session.updated_at).getTime();
-      if (now - updatedAt >= STOPPED_SESSION_TTL_MS) {
-        delete store.sessions[key];
-        hasChanges = true;
-      }
+    // Remove sessions whose Claude Code process has exited
+    if (session.pid && !isProcessAlive(session.pid)) {
+      delete store.sessions[key];
+      hasChanges = true;
     }
   }
 

@@ -24,6 +24,7 @@ export interface Session {
   session_id: string;
   cwd: string;
   tty?: string;
+  pid?: number;
   status: SessionStatus;
   created_at: string;
   updated_at: string;

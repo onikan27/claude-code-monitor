@@ -351,32 +351,34 @@ describe('file-store', () => {
       expect(sessions).toHaveLength(2);
     });
 
-    it('should remove stopped sessions after TTL expires', async () => {
+    it('should remove sessions whose process has exited', async () => {
       const { writeStore, getSessions } = await import('../src/store/file-store.js');
       const now = Date.now();
 
       writeStore({
         sessions: {
-          'stopped-old:/dev/ttys001': {
-            session_id: 'stopped-old',
+          'dead:/dev/ttys001': {
+            session_id: 'dead',
             cwd: '/tmp',
             tty: '/dev/ttys001',
-            status: 'stopped',
-            updated_at: new Date(now - 10_000).toISOString(),
-          },
-          'stopped-recent:/dev/ttys002': {
-            session_id: 'stopped-recent',
-            cwd: '/tmp',
-            tty: '/dev/ttys002',
+            pid: 999999,
             status: 'stopped',
             updated_at: new Date(now).toISOString(),
           },
-          'running:/dev/ttys003': {
-            session_id: 'running',
+          'alive:/dev/ttys002': {
+            session_id: 'alive',
+            cwd: '/tmp',
+            tty: '/dev/ttys002',
+            pid: process.pid,
+            status: 'stopped',
+            updated_at: new Date(now).toISOString(),
+          },
+          'no-pid:/dev/ttys003': {
+            session_id: 'no-pid',
             cwd: '/tmp',
             tty: '/dev/ttys003',
             status: 'running',
-            updated_at: new Date(now - 10_000).toISOString(),
+            updated_at: new Date(now).toISOString(),
           },
         },
         updated_at: new Date().toISOString(),
@@ -384,9 +386,9 @@ describe('file-store', () => {
 
       const sessions = getSessions();
 
-      // Expired stopped session removed, recent stopped and running kept
+      // Dead PID removed, alive PID and no-pid kept
       expect(sessions).toHaveLength(2);
-      expect(sessions.map((s) => s.session_id).sort()).toEqual(['running', 'stopped-recent']);
+      expect(sessions.map((s) => s.session_id).sort()).toEqual(['alive', 'no-pid']);
     });
   });
 
