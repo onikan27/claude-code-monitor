@@ -195,14 +195,14 @@ export function determineStatus(event: HookEvent, currentStatus?: SessionStatus)
     return 'running';
   }
 
-  // Keep stopped state (don't resume except for UserPromptSubmit)
-  if (currentStatus === 'stopped') {
-    return 'stopped';
-  }
-
-  // Active operation event
+  // PreToolUse means active work (including subagents) — resume even if stopped
   if (event.hook_event_name === 'PreToolUse') {
     return 'running';
+  }
+
+  // Keep stopped state for other events (PostToolUse, non-permission Notification)
+  if (currentStatus === 'stopped') {
+    return 'stopped';
   }
 
   // Waiting for permission prompt

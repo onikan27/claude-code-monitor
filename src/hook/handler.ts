@@ -23,7 +23,11 @@ export function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
-export async function handleHookEvent(eventName: string, tty?: string, pid?: number): Promise<void> {
+export async function handleHookEvent(
+  eventName: string,
+  tty?: string,
+  pid?: number
+): Promise<void> {
   // Validate event name against whitelist
   if (!isValidHookEventName(eventName)) {
     console.error(`Invalid event name: ${eventName}`);

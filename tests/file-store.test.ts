@@ -117,7 +117,7 @@ describe('file-store', () => {
       expect(determineStatus(event, 'stopped')).toBe('stopped');
     });
 
-    it('should return running on PreToolUse event', async () => {
+    it('should return running on PreToolUse event even if stopped (subagent)', async () => {
       const { determineStatus } = await import('../src/store/file-store.js');
       const event: HookEvent = {
         session_id: 'test',
@@ -126,6 +126,7 @@ describe('file-store', () => {
       };
       expect(determineStatus(event)).toBe('running');
       expect(determineStatus(event, 'waiting_input')).toBe('running');
+      expect(determineStatus(event, 'stopped')).toBe('running');
     });
 
     it('should return waiting_input on Notification with permission_prompt', async () => {
