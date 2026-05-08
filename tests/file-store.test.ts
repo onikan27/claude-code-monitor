@@ -320,7 +320,7 @@ describe('file-store', () => {
       expect(sessions[1].session_id).toBe('new');
     });
 
-    it('should not remove sessions based on time (no timeout)', async () => {
+    it('should not remove running sessions based on time', async () => {
       const { writeStore, getSessions } = await import('../src/store/file-store.js');
       const now = Date.now();
       const thirtyOneMinutesAgo = now - 31 * 60 * 1000;
@@ -347,8 +347,46 @@ describe('file-store', () => {
 
       const sessions = getSessions();
 
-      // Sessions are not removed based on time, only TTY existence
+      // Running sessions are not removed based on time
       expect(sessions).toHaveLength(2);
+    });
+
+    it('should remove stopped sessions after TTL expires', async () => {
+      const { writeStore, getSessions } = await import('../src/store/file-store.js');
+      const now = Date.now();
+
+      writeStore({
+        sessions: {
+          'stopped-old:/dev/ttys001': {
+            session_id: 'stopped-old',
+            cwd: '/tmp',
+            tty: '/dev/ttys001',
+            status: 'stopped',
+            updated_at: new Date(now - 10_000).toISOString(),
+          },
+          'stopped-recent:/dev/ttys002': {
+            session_id: 'stopped-recent',
+            cwd: '/tmp',
+            tty: '/dev/ttys002',
+            status: 'stopped',
+            updated_at: new Date(now).toISOString(),
+          },
+          'running:/dev/ttys003': {
+            session_id: 'running',
+            cwd: '/tmp',
+            tty: '/dev/ttys003',
+            status: 'running',
+            updated_at: new Date(now - 10_000).toISOString(),
+          },
+        },
+        updated_at: new Date().toISOString(),
+      });
+
+      const sessions = getSessions();
+
+      // Expired stopped session removed, recent stopped and running kept
+      expect(sessions).toHaveLength(2);
+      expect(sessions.map((s) => s.session_id).sort()).toEqual(['running', 'stopped-recent']);
     });
   });
 

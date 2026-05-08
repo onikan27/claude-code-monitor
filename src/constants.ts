@@ -17,6 +17,9 @@ export const SESSION_UPDATE_DEBOUNCE_MS = 150;
 /** Debounce delay for JSON file writes in milliseconds */
 export const WRITE_DEBOUNCE_MS = 100;
 
+/** Time in milliseconds before stopped sessions are automatically removed (5 seconds) */
+export const STOPPED_SESSION_TTL_MS = 5_000;
+
 /** Periodic refresh interval for timeout detection in milliseconds (60 seconds) */
 export const SESSION_REFRESH_INTERVAL_MS = 60_000;
 
